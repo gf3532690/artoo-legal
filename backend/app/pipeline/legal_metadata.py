@@ -224,6 +224,23 @@ def build_content_prefix(legal: dict | None, fallback_title: str = "") -> str:
     return "[" + " ".join(parts) + "]"
 
 
+# 响应组装时剥离 content 前缀：``[法名 第N条]`` / ``[文件名]``。
+# 限定 1~200 字符且不含换行，避免误伤以方括号开头的正文。
+_CONTENT_PREFIX = re.compile(r"^\[[^\]\n]{1,200}\]\s*")
+
+
+def strip_content_prefix(text: str) -> str:
+    """移除 ``build_content_prefix`` 写入的前缀，恢复纯法条文本。
+
+    ``content`` 是 Milvus 的索引字段，会原样出现在结果里：``direct`` 模式下是
+    ``content`` 本身，``hybrid`` 模式下是 ``child_content``（``content`` 被父块
+    内容替换，父块来自 PG、不带前缀）。前缀只服务于词法匹配，不应污染对外返回。
+    """
+    if not text:
+        return text
+    return _CONTENT_PREFIX.sub("", text, count=1)
+
+
 class LegalMetadataExtractor:
     """逐 child chunk 产出一份法条元数据字典。
 

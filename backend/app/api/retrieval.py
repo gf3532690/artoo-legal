@@ -25,6 +25,8 @@ from app.config import get_settings
 from app.models.manager import get_model_manager
 from app.retrieval.base import RetrievalResult
 from app.retrieval.factory import build_hybrid_retriever
+from app.pipeline.legal_metadata import strip_content_prefix
+from app.retrieval.legal_scope import resolve_global_legal_kb_ids
 from app.retrieval.log_safety import sanitize_for_log
 from app.retrieval.multi_kb import KBRetrievalConfig, MultiKBRetriever
 from app.retrieval.vector import VectorRetriever
@@ -95,7 +97,9 @@ class RetrievalTestRequest(BaseModel):
         description="检索模式: direct（仅稠密）/ hybrid（三路混合 + 平台开启图谱时并入图谱第四路）。"
         "注意：多源（多库或含会话附件）统一按 hybrid 混合召回口径执行，direct 仅在单库单源时生效。",
     )
-    top_k: int = Field(default=10, ge=1, le=100, description="返回结果数量")
+    # 法条库部署的默认值：5（上游为 10）。字段名与语义保持不变，
+    # 只调默认值，见 docs/legal-recall-implementation-plan.md 决策 #8。
+    top_k: int = Field(default=5, ge=1, le=100, description="返回结果数量")
 
     def resolve_kb_ids(self) -> list[str]:
         """归并 ``kb_ids`` 与单选 ``knowledge_base_id`` 为去重后的知识库 ID 列表（保持顺序）。
@@ -191,6 +195,16 @@ async def _run_retrieval(
     """
     kb_ids = body.resolve_kb_ids()
     session_id = body.session_id
+
+    # 法条库部署：**全局法条库默认并入检索范围**，调用方不必（也不应）自己传。
+    # 并入位置在授权之前，让它像其它源一样走同一套读授权判定——单租户部署下
+    # 全局库是 organization + read，同租户身份自然通过，不需要任何租户例外。
+    # 见 docs/legal-recall-implementation-plan.md 的 D4 / D5 / D6。
+    global_kb_ids = await resolve_global_legal_kb_ids()
+    if global_kb_ids:
+        # 去重且保持顺序：调用方若自己传了全局库 id，不会产生重复源。
+        kb_ids = list(dict.fromkeys([*kb_ids, *global_kb_ids]))
+
     if not kb_ids and not session_id:
         raise HTTPException(
             status_code=400,
@@ -204,13 +218,17 @@ async def _run_retrieval(
     # 单库单源保留原 direct/hybrid + trace 行为，零回归。
     is_multi_source = len(kb_ids) > 1 or session_id is not None
     if is_multi_source:
-        return await _run_multi_source_retrieval(body, kb_ids, session_id, identity)
+        return await _run_multi_source_retrieval(
+            body, kb_ids, session_id, identity, global_kb_ids
+        )
 
-    return await _run_single_kb_retrieval(body, kb_ids[0])
+    return await _run_single_kb_retrieval(body, kb_ids[0], global_kb_ids)
 
 
 async def _run_single_kb_retrieval(
-    body: RetrievalTestRequest, kb_id: str
+    body: RetrievalTestRequest,
+    kb_id: str,
+    global_kb_ids: list[str] | None = None,
 ) -> RetrievalTestResponse:
     """单库单源检索：保留原 ``direct`` / ``hybrid`` + trace 行为（零回归）。
 
@@ -222,7 +240,7 @@ async def _run_single_kb_retrieval(
         manager = get_model_manager()
         retriever = VectorRetriever(manager.embedder, _get_milvus())
         results = await retriever.search(body.query, kb_id, top_k=body.top_k)
-        items = await _build_result_items(results)
+        items = await _build_result_items(results, global_kb_ids=global_kb_ids)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return RetrievalTestResponse(
             query=body.query,
@@ -241,7 +259,9 @@ async def _run_single_kb_retrieval(
     results, trace_data = await hybrid_retriever.search_with_trace(
         body.query, kb_id, top_k=body.top_k, apply_rerank_filter=False
     )
-    items = await _build_result_items(results, trace_data.get("per_result"))
+    items = await _build_result_items(
+        results, trace_data.get("per_result"), global_kb_ids=global_kb_ids
+    )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     trace = RetrievalTrace(
@@ -263,6 +283,7 @@ async def _run_multi_source_retrieval(
     kb_ids: list[str],
     session_id: str | None,
     identity: IdentityContext,
+    global_kb_ids: list[str] | None = None,
 ) -> RetrievalTestResponse:
     """多库 / 会话附件联合检索：走 ``MultiKBRetriever`` 混合召回（与生产 chat 同口径）。
 
@@ -311,7 +332,9 @@ async def _run_multi_source_retrieval(
         body.query, kb_configs, top_k=body.top_k, tenant_id=identity.tenant_id,
         apply_rerank_filter=False,
     )
-    items = await _build_result_items(multi_result.results, session_id=session_id)
+    items = await _build_result_items(
+        multi_result.results, session_id=session_id, global_kb_ids=global_kb_ids
+    )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     return RetrievalTestResponse(
@@ -365,6 +388,7 @@ async def _build_result_items(
     results: list[RetrievalResult],
     per_result: dict | None = None,
     session_id: str | None = None,
+    global_kb_ids: list[str] | None = None,
 ) -> list[RetrievalResultItem]:
     """将检索结果转换为响应格式，附带文件名与（可选的）链路分数信号。
 
@@ -406,23 +430,62 @@ async def _build_result_items(
                     doc_filenames[row.id] = row.filename
                     session_file_ids.add(row.id)
 
+    # 法条元数据水合：按 chunk_id 批量取一次 Chunk，拿到 chunk_metadata 与 kb_id。
+    # 与上面的文件名水合同属「一次批量查」模式——禁止按结果逐条查询（N 次单查）。
+    chunk_ids = list({r.chunk_id for r in results})
+    chunk_legal: dict[str, dict] = {}
+    chunk_kb: dict[str, str] = {}
+    if chunk_ids:
+        from app.schema.db import Chunk
+
+        async with async_session() as session:
+            rows = await session.execute(
+                select(Chunk.id, Chunk.kb_id, Chunk.chunk_metadata).where(
+                    Chunk.id.in_(chunk_ids)
+                )
+            )
+            for row in rows:
+                chunk_kb[row.id] = row.kb_id
+                if isinstance(row.chunk_metadata, dict):
+                    chunk_legal[row.id] = row.chunk_metadata
+
+    # 法条字段放进已有的 metadata 槽位，不新增顶层字段（响应模型保持不变）。
+    _LEGAL_KEYS = ("law_name", "article_number", "article_label", "chapter")
+    global_set = set(global_kb_ids or [])
+
     items: list[RetrievalResultItem] = []
     for r in results:
         trace_entry = (per_result or {}).get(r.chunk_id, {})
         source_type = "session" if r.doc_id in session_file_ids else "knowledge_base"
+
+        metadata = dict(r.metadata or {})
+        legal_raw = chunk_legal.get(r.chunk_id, {})
+        for key in _LEGAL_KEYS:
+            value = legal_raw.get(key)
+            if value is not None:
+                metadata[key] = value
+
+        # 来源标记：命中全局法条库为 global，其余（个人库 / 会话附件）为 personal。
+        # 只在解析到全局库时才标注，避免非法条部署凭空多出该字段。
+        if global_kb_ids is not None:
+            kb_id = chunk_kb.get(r.chunk_id)
+            metadata["source"] = "global" if kb_id in global_set else "personal"
+
         items.append(
             RetrievalResultItem(
                 chunk_id=r.chunk_id,
                 doc_id=r.doc_id,
                 filename=doc_filenames.get(r.doc_id, ""),
                 source_type=source_type,
-                content=r.content,
-                child_content=r.child_content or r.content,
+                # content 是 Milvus 的索引字段，带 [法名 第N条] / [文件名] 前缀，
+                # 只服务于词法匹配；对外返回前剥离，避免污染法条正文（见 D12）。
+                content=strip_content_prefix(r.content),
+                child_content=strip_content_prefix(r.child_content or r.content),
                 score=round(r.score, 4),
                 rrf_score=trace_entry.get("rrf_score"),
                 rerank_score=trace_entry.get("rerank_score"),
                 routes=trace_entry.get("routes", []),
-                metadata=r.metadata,
+                metadata=metadata,
             )
         )
     return items
