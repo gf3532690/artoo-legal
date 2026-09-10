@@ -11,6 +11,20 @@
 
 ---
 
+## 0. 本部署（法条库）相对上游 Artoo 的差异
+
+本仓库是 **法条召回服务** 的产品线分支，由上表的上游 Artoo fork 而来。接口契约以下面几条为准；未列出的章节与上游完全一致。
+
+| # | 差异 | 说明 |
+|---|------|------|
+| 1 | **检索默认带上「全局法条库」** | `POST /api/retrieval/search` 会把调用方传入的 `kb_ids` 与全局法条库自动合并检索；**即使不传任何检索范围也会返回该库结果**（上游此处返回 `400`） |
+| 2 | **`top_k` 默认值为 5** | 字段名不变，仅本部署默认值由 `10` 调为 `5` |
+| 3 | **不再支持 `session_id`** | 会话附件链路随非召回链路一并移除；相关章节标为「本部署未启用」 |
+| 4 | **结果 `metadata` 追加法条字段** | `law_name`、`article_number`、`article_label`、`chapter`、`source`（取值 `global` / `personal`） |
+| 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
+
+---
+
 ## 1. 认证与集成模型
 
 ### 1.1 凭据形式
@@ -525,6 +539,8 @@ curl $BASE/api/knowledge-bases/<kb_id>/folders/<folder_id>/breadcrumb \
 
 ### 6.1 纯检索召回（不经 LLM）
 
+> **本部署差异**：检索范围默认并入**全局法条库**（不传任何范围也不再返回 `400`）；`top_k` 默认值为 `5`；不支持 `session_id`。详见第 0 节。
+
 单轮召回，只返回命中的 chunk 及多维分数信号，不经 LLM 生成。两个等价路径：
 
 - `POST /api/retrieval/search`：**对外集成推荐**，语义为「检索召回」。
@@ -611,6 +627,8 @@ curl -X POST $BASE/api/retrieval/search \
 
 ### 6.1.1 Agent 检索召回（多步推理召回）
 
+> ⚠️ **本部署未启用**：Agent 链路已移除（见第 0 节）。以下说明保留供上游参考。
+
 `POST /api/retrieval/agent`
 
 区别于 6.1 的单轮召回：跑 ReAct Agent 引擎，围绕问题**多步检索、反思、改写子查询**后汇聚证据，返回其召回的引用来源与最终作答。召回口径（含图谱第四路）与 `/v1/chat/completions` 的 `agent` 模式一致。无会话概念（不落库、不加载历史、不接入会话临时文件），一次请求一个独立推理链。
@@ -653,6 +671,8 @@ curl -X POST $BASE/api/retrieval/agent \
 > `agent_steps` 用于在第三方界面还原 Agent 的检索/推理过程；只需召回来源时取 `references` 即可。各步骤对象的字段结构与流式 SSE 事件**完全一致**，见 6.3.1；还原为可视步骤面板的算法见 6.3.2。
 
 ### 6.2 对话问答（OpenAI 兼容）
+
+> ⚠️ **本部署未启用**：对话链路已移除（见第 0 节）。以下说明保留供上游参考。
 
 `POST /v1/chat/completions`（别名 `POST /api/chat/completions`）
 
@@ -704,6 +724,8 @@ curl -X POST $BASE/v1/chat/completions \
 > **非流式 + `agent` 模式的限制**：响应体只有 `choices` / `usage` / `references` / `metadata`，**不含 `agent_steps`**（步骤已落库，但不在本次响应里回传）。要拿本轮步骤有两条路：传了 `session_id` 时答完再调 `GET /api/sessions/{id}/messages` 取最后一条 assistant 的 `agent_steps`；或改用 `POST /api/retrieval/agent`（响应直接带 `agent_steps`，但无会话、不落库）。想在同一次请求里边跑边拿步骤，用 6.3 的流式。
 
 ### 6.3 流式问答（SSE）
+
+> ⚠️ **本部署未启用**：对话链路已移除（见第 0 节）。以下说明保留供上游参考。
 
 设 `"stream": true`，返回 `text/event-stream`，逐条 `data:` 为一段 JSON。共有三类帧，**按「有没有 `type` 字段」区分**，第三方解析时须按下列顺序判别：
 
@@ -776,6 +798,8 @@ curl -N -X POST $BASE/v1/chat/completions \
 
 ### 6.4 多轮对话（平台托管历史）
 
+> ⚠️ **本部署未启用**：对话链路已移除（见第 0 节）。以下说明保留供上游参考。
+
 传 `session_id`，平台自动加载该会话最近 N 轮（默认 10 轮）历史拼进上下文，并把本轮 user 消息与 assistant 回答落库。第三方每轮只需发当前这一条 user 消息。会话严格按 `X-External-User-Id` 隔离。
 
 ```bash
@@ -795,6 +819,8 @@ curl -X POST $BASE/v1/chat/completions \
 > 也可完全自管历史：不传 `session_id`，自行把多轮上下文按顺序塞进 `messages` 数组。
 
 ### 6.5 外部 MCP 工具接入（Agent 调用第三方工具）
+
+> ⚠️ **本部署未启用**：MCP 链路已移除（见第 0 节）。以下说明保留供上游参考。
 
 适用场景：第三方业务系统需要 Agent 在对话中调用**自己的**工具——如读取业务系统的实时文档、提交文本修改提案等。工具语义完全留在第三方侧，Artoo 只提供通用的「外部 MCP 工具」通道，不感知具体业务；任何第三方均可复用同一通道注册工具。
 
@@ -1127,6 +1153,8 @@ public Map<String, String> verifyArtooCaller(HttpServletRequest req) throws Exce
 
 ### 6.6 把 Artoo 知识库接进你的 AI 客户端（Artoo 作为 MCP server）
 
+> ⚠️ **本部署未启用**：MCP Server 已移除（见第 0 节）。以下说明保留供上游参考。
+
 反向场景：你已有自己的 Agent / IDE 客户端（Claude Desktop、Cursor、官方 SDK 写的应用），想直接检索 Artoo 知识库。Artoo 自身也是**标准 MCP server**。
 
 **端点**：`POST {BASE}/mcp`（Streamable HTTP，JSON-RPC 2.0）
@@ -1178,6 +1206,8 @@ curl -s $BASE/mcp -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EU" \
 ---
 
 ## 7. 会话管理
+
+> ⚠️ **本部署未启用**：会话链路已移除（见第 0 节）。以下说明保留供上游参考。
 
 会话按 `X-External-User-Id` 严格隔离（他人 `session_id` 一律 `404`）。
 
@@ -1399,6 +1429,8 @@ curl -N -X POST $BASE/v1/chat/completions \
 
 ## 8. 会话临时文件（传一个文件立刻问它）
 
+> ⚠️ **本部署未启用**：会话附件链路已移除（见第 0 节）。以下说明保留供上游参考。
+
 在某会话内上传文件并建索引，可直接在该会话问答中被检索。前缀 `/api/sessions/{session_id}/files`。
 
 **上传为「秒回 + 后台异步建索引」模型**：上传接口在完成落盘 + 存储原件 + 建 `queued` 记录 + 入队后**立即返回 `202`**，不等待解析/切分/向量化。建索引进度由独立后台进程推进，客户端有两种方式获取进展：
@@ -1577,6 +1609,8 @@ wscat -c "ws://localhost:8000/api/sessions/<session_id>/files/events?ak=$AK&ts=$
 ---
 
 ## 9. 知识图谱（前缀 `/api/kb`）
+
+> ⚠️ **本部署未启用**：知识图谱在本部署中不做（见第 0 节）。以下说明保留供上游参考。
 
 ### 9.1 图谱总览 / ego 子图
 
