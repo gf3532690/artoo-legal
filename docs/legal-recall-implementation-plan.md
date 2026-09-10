@@ -89,8 +89,8 @@
 
 | 项 | 实测值 |
 |---|---|
-| 文件数 | 347（345 `.docx` + 2 `.doc`），可解析文本的 346 个已全量统计 |
-| 命名约定 | `<法名>_<YYYYMMDD>`，346/346 全部符合——**但不作为权威来源** |
+| 文件数 | 347（345 `.docx` + 2 `.doc`）；345 个 `.docx` 已全量解析，2 个 `.doc` 需 LibreOffice 转换后才能读 |
+| 命名约定 | `<法名>_<YYYYMMDD>`，345/345 `.docx` 全部符合（2 个 `.doc` 同规则未验证）——**但不作为权威来源** |
 | 同名多版本 | 0 个（去掉日期后无重名） |
 | 总文本量 | 2,791,399 字 |
 | 文档长度 | 中位数 6,517 字，P90 14,600，最长《民法典》108,593 字 |
@@ -140,6 +140,13 @@
 | 评测工具 | B5 Evaluation_Harness，复用 `search_with_trace`，支持 before/after 对比 | `app/scripts/evaluate_retrieval.py` |
 | 现有评测集 | 仅 5 条 query，按 `expected_keywords` 判命中，`expected_doc_ids` 全空 | `app/scripts/eval_sets/large-kb-legal-sample.json` |
 | 仓库规范 | 非平凡变更必须同 PR 提交 Agent Note（英文 + `.zh.md`） | `AGENTS.md` |
+
+> **动手前必须知道：测试与评测工具都不在版本管理内。** `.gitignore` 第 77–84 行明确忽略 `backend/tests/`（注释：「本地测试文件，不纳入版本管理」）与 `backend/app/scripts/`（「内部评估/性能测试脚本」），另有 `backend/_e2e_*.py`。由此产生四个必须处理的后果：
+>
+> 1. **新克隆里既没有测试套件、也没有评测 harness。** 本机 `aladdin` 的 `backend/tests/` 有 155 个文件（可收集 524 个用例），`backend/app/scripts/` 有 7 个文件（含 `evaluate_retrieval.py` 与 `eval_sets/`）。这两份已复制进本 fork 的工作区，否则 §10 的验证策略与 §8.1 第 12 项都无从谈起。
+> 2. **Phase 0 要补的回归测试若写进 `backend/tests/`，会被 gitignore 挡在提交之外**——测试写了但永远不进仓库。二选一：在 fork 里放开该忽略规则（**建议**，长期产品线理应由产品自带测试），或把新测试放到被跟踪的目录。
+> 3. **本机测试基线并非全绿。** 524 个用例可收集，但有 6 个文件因引用已删除/改名的模块而收集失败：`test_content_router.py`、`test_e2e_session_upload.py`、`test_final_answer_parse.py`、`test_json_field_extractor.py`、`test_milvus_session_files.py`、`test_thinking_dialect.py`。它们是**既有陈旧文件**、不在本次改造范围内；将来跑 pytest 需用 `--ignore` 排除或先清理，否则收集错误会中断整轮。
+> 4. **Python 环境用 conda 的 `aladdin` 环境（3.12.13）**，不是仓库内的 `.venv`（3.13.11，与项目要求的 3.12 不符）。前端 `npm ci` 已在本 fork 工作区装好，`npm run build` 实测通过。
 
 ---
 
@@ -261,19 +268,33 @@
 
 以及前端对应页面与路由。
 
-**删除前必须处理的两处耦合**（按目录删会炸掉别的东西）：
+**删除前必须处理的六处耦合**（按目录删会炸掉别的东西；以下为逐文件核查结果）：
 
-1. `session_upload/limits.py` **不是会话专属**——它是普通上传的容量校验器，被 `api/document.py` 与 `pipeline/pipeline.py` 依赖。必须先挪到中立位置（如 `app/pipeline/limits.py`）再删 `session_upload/`。
-2. `api/retrieval.py` 引用了 `session_upload.service`（会话附件作为检索源）。删除会话附件事务后，需一并移除该分支。
+| # | 耦合点 | 位置 | 处置 |
+|---|--------|------|------|
+| 1 | `session_upload/limits.py` **不是会话专属**，是普通上传的容量校验器 | `api/document.py:34`、`pipeline/pipeline.py:50,571` | 先挪到中立位置（如 `app/pipeline/limits.py`）再删 `session_upload/` |
+| 2 | `session_upload.service` 被检索接口当会话附件源引用 | `api/retrieval.py:31` | 随会话附件一并移除该分支 |
+| 3 | `session_upload.memory::recommend_kb_chunk_cap` 被系统配置接口引用 | `api/system.py:26` | 一并挪到中立位置或内联 |
+| 4 | `agent.tools.mcp_client::invalidate_mcp_tools_cache` 被能力重载引用 | `api/capability_reload.py:59` | 移除该分支（MCP 随 D7 删除） |
+| 5 | 会话上传的 EventHub / 队列 / 订阅循环在 lifespan 里初始化 | `main.py:251,256,290,291` | 与路由同批移除 |
+| 6 | 会话上传 Worker 在 Worker 进程里启动 | `worker_main.py:194-197` | 同批移除 |
 
-**不再需要处理的一项**：`_get_llm_for_request` 原本被图谱抽取依赖，但引用图谱已砍（见 §1），因此本次删除不需要抽出这个函数。若入库 LLM 补抽也不做（本期不做），法条库应用**不含任何 LLM 调用**。
+**修正一处先前的误判：`_get_llm_for_request` 仍然需要抽出。** 早先写「图谱已砍，因此不需要抽出这个函数」——但**图谱代码本身不在删除清单里**。它按 D15 的模式处理：**配置层关闭、不删模块**（`GRAPH_ENABLE=false`）。
+
+而 `storage/graph_store.py:2388` 与 `pipeline/graph/worker.py:438` 仍在函数内 `from app.api.chat import _get_llm_for_request`。删掉 `chat.py` 后这两处就成了指向不存在模块的死引用——图谱开关一旦被打开就 `ImportError`。
+
+处置：把 `_get_llm_for_request` 抽到中立模块（如 `app/models/llm_resolver.py`），改这两处 import。改动很小，但必须做。
+
+**`api/query_understanding.py` 会成为孤儿**：它只被 `chat.py:22` 引用，随 D7 一并删除。
+
+**入库侧本就没有 LLM**：`pipeline.py` 的 `Enricher(llm=None, enabled=False)` 是硬编码关闭的。删掉上述模块后，法条库应用在**请求路径上不含任何 LLM 调用**（图谱代码保留但永不启用）。
 
 ### D8 · Fork 带来的工程约束
 
 前提见文首。由「Fork 仓库 + 全新部署」推出的结论：
 
 - **收益**：无存量迁移、数据结构可自由演进、全局库可在引导时一次创建
-- **代价**：fork 会与上游分叉，而上游 `9ilfoyl3/artoo` 仍在活跃演进。改造必然触碰共享文件（`pipeline/pipeline.py`、`api/retrieval.py`、`api/documents.py`、前端 `Layout.tsx` / `App.tsx` / `Landing.tsx`）
+- **代价**：fork 会与上游分叉，而上游 `9ilfoyl3/artoo` 仍在活跃演进。改造必然触碰共享文件（`pipeline/pipeline.py`、`api/retrieval.py`、`api/document.py`、前端 `Layout.tsx` / `App.tsx` / `Landing.tsx`）
 - **约束**：专属逻辑尽量落在新文件；共享文件只做最小插入；**把上游配成 `upstream` remote 并定期 fetch + 合并**（`git remote add upstream https://github.com/9ilfoyl3/artoo.git`）；fork 即长期产品线的上游，不计划向原仓库提 PR
 - **本地工作仓库（已就绪）**：fork 为 `gf3532690/artoo-legal`，本地克隆在 `C:\newHLSWorkspace\artoo-legal`；`origin` 指向 fork、`upstream` 指向原仓库 `9ilfoyl3/artoo`，工作分支 `develop`（基线 `3c184f5`，其上已有方案文档提交）。改造全部在这个仓库内进行，**不动**上游克隆 `C:\newHLSWorkspace\aladdin`
 - **注意**：GitHub 对同一账号 + 同一仓库只允许一个 fork。原有一个 2026-05-19 的陈旧 fork（名为 `aladdin`，对应项目旧名）已按无独有提交核实后**改名为 `artoo-legal`**并同步到上游最新状态——效果等同于重建，且不需要删库权限
@@ -300,7 +321,7 @@
 
 ### D10 · 目录剥离：标记驱动，绝不按位置猜
 
-**数据**：264/346 文件含独立「目录」行，目录区合计 2,988 行（约占全部 chunk 的 11%）。这些行是「第九章　诉讼时效」这类主题标签，语义上与用户查询高度相似，会挤占召回名额并返回无用内容。
+**数据**：264/345 文件含独立「目录」行，目录区合计 2,988 行（约占全部 chunk 的 11%）。这些行是「第九章　诉讼时效」这类主题标签，语义上与用户查询高度相似，会挤占召回名额并返回无用内容。
 
 **规则（必须按标记，不能按位置）**：
 
@@ -310,7 +331,7 @@
 
 **为什么必须标记驱动**：语料里有 37 个文件（另有 2 个 `.doc` 同类）**完全没有 `第X条` 结构**（见 D11），它们整篇都是正文。若按「丢弃第一条之前的全部内容」这种朴素规则处理，这些文件会被整篇删空。
 
-**安全性证据**：346 个文件中，「有目录标记」与「无 `第X条`」的交集为 **0**。因此在现有语料上，标记驱动规则不会误伤任何文件。
+**安全性证据**：345 个 `.docx` 中，「有目录标记」与「无 `第X条`」的交集为 **0**。因此在现有语料上，标记驱动规则不会误伤任何文件。
 
 ### D11 · 无条文结构文档（修正案 / 决定 / 规定）的处理
 
@@ -333,7 +354,7 @@
 **处置**：
 
 1. `article_number = None` —— 这类文件本就没有条文编号，硬造反而错
-2. `law_name` 从首行提取（「中华人民共和国刑法修正案（十一）」）
+2. `law_name` 按 D13 的规则提取（首行至日期行之前拼接；本例标题只占一行，结果即「中华人民共和国刑法修正案（十一）」）
 3. **给 `LawsChunker` 加一个条件化 fallback**：当整篇**零个行首 `第X条`** 时，退化用「一、二、三、」作为父块边界；只要有任意一个 `第X条` 命中，就完全走现有逻辑
 
 **为什么必须条件化**：普通法律里「一、二、三」是**条文内部**的项（《国籍法》第七条含三个项）。若无条件把「一、」当父块边界，会把这些项从所属条文里拆出去，破坏本来正确的结构。
@@ -385,7 +406,9 @@
 
 `section_path` 有两个下游：`context_embedder.py` 会把它拼进 embedding 输入；我们还要把它作为 `chapter` / `section` 对外返回。后果是条文里的「项」内容会混进章节字段。
 
-**处置**：**不改 `metadata.py`**（那是 Artoo 的公共行为，改动面大且会影响 Artoo 那边）。在 `LegalMetadataExtractor` 里对 `section_path` 做一次清洗——**只保留形如「第X编 / 第X章 / 第X节」的元素**，其余丢弃。符合 D8「专属逻辑放新文件」的约束。
+**处置**：**不改 `metadata.py`**（那是 Artoo 的公共行为，改动面大且会影响 Artoo 那边）。在 `LegalMetadataExtractor` 里对 `section_path` 做一次清洗——**只保留形如「第X编 / 第X分编 / 第X章 / 第X节」的元素**，其余丢弃。符合 D8「专属逻辑放新文件」的约束。
+
+> **「分编」不能漏**：《民法典》的层级是「编 → 分编 → 章 → 节」。清洗规则若只写「第X编」会误删「第一分编　通则」这一级——§7.3 的响应示例本身就是这个形态。
 
 ### D15 · OCR 与 ASR 关闭（配置层，不删模块）
 
@@ -440,7 +463,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `law_name` | str \| None | 法律全名（取自正文首行） |
+| `law_name` | str \| None | 法律全名（首行至**日期行之前**拼接，见 D13；不能简单取首行） |
 | `article_number` | int \| None | 条号；无条文结构文档为 `None` |
 | `article_label` | str \| None | 原文条号（如「第一百四十六条」） |
 | `chapter` / `section` | str \| None | 章节，直接取现有 `section_path` |
@@ -589,7 +612,8 @@ Authorization: Bearer sk-xxx
         "law_name": "中华人民共和国民法典",
         "article_number": 146,
         "article_label": "第一百四十六条",
-        "chapter": "第三编　合同 / 第一分编　通则"
+        "chapter": "第三编　合同 / 第一分编　通则",
+        "source": "global"
       }
     }
   ],
@@ -628,14 +652,16 @@ Authorization: Bearer sk-xxx
 | 9 | 内容维护 | `api/document.py` + `api/knowledge_base.py` 全套 |
 | 10 | 前端能力开关 | `/api/system/frontend-config` + `useGraphGating.ts` 的现成门控模式 |
 | 11 | 引导框架 | `auth/bootstrap.py::run_bootstrap`（幂等） |
-| 12 | 评测工具 | `app/scripts/evaluate_retrieval.py`（不用新建） |
+| 12 | 评测工具 | `app/scripts/evaluate_retrieval.py`（不用新建）。**该目录被 `.gitignore` 忽略**，新克隆里没有，需从本机复制 |
 | 13 | BM25 内容增强 | `content` 的 `[前缀]` 机制（扩展它做条号归一） |
 
 ### 8.2 需改现有代码
 
 - `pipeline/pipeline.py`：接入新的法条抽取器；扩展写入 Milvus 的 `content` 前缀
 - `pipeline/chunkers/laws.py`：新增「整篇无 `第X条`」时的 fallback 切分分支（按「一、」切父块），见 D11
-- `api/retrieval.py`：检索目标默认并入全局库；水合扩展法条字段；移除会话附件分支（随 D7）
+- `api/retrieval.py`：检索目标默认并入全局库；水合扩展 `law_name` / `article_number` / `source`；移除会话附件分支（随 D7）
+- `api/capability_reload.py` / `api/system.py` / `main.py` / `worker_main.py`：随 D7 移除对 `app.agent` 与 `app.session_upload` 的引用（见 D7 的六处耦合表）
+- `api/chat.py`：把 `_get_llm_for_request` 抽到中立模块（如 `app/models/llm_resolver.py`），并改图谱侧两处 import（见 D7）
 - `auth/bootstrap.py`：增加全局法条库引导步骤
 - `api/document.py` / `pipeline/pipeline.py`：随 D7 把 `limits.py` 的引用改到新位置
 - 前端：菜单、路由、术语与品牌文案
@@ -686,7 +712,7 @@ Authorization: Bearer sk-xxx
 | 任务 | 文件 | 说明 |
 |------|------|------|
 | 全局库默认并入 | `api/retrieval.py` | 检索目标自动带全局库 |
-| 结果水合扩展 | `api/retrieval.py::_build_result_items` | 批量补 `law_name` / `article_number` |
+| 结果水合扩展 | `api/retrieval.py::_build_result_items` | 批量补 `law_name` / `article_number` / `source` |
 | `top_k` 默认值 | `api/retrieval.py` | 本部署改为 5 |
 
 交付判据：不传 kb_ids 也能返回全局库结果；「民法典第146条」可命中；结果带法名与条号。
@@ -732,7 +758,7 @@ Authorization: Bearer sk-xxx
 
 ### Phase 5 · 删除非召回链路
 
-见 D7。先挪 `session_upload/limits.py`、再删会话附件引用，最后删模块与前端页面。
+见 D7。顺序：先把 `limits.py` 挪到中立位置、把 `_get_llm_for_request` 抽到中立模块 → 再清掉六处耦合引用 → 最后删模块与前端页面。会话 collection（`artoo_session_chunks`）随之停建。
 
 ---
 
@@ -743,7 +769,7 @@ Authorization: Bearer sk-xxx
 | 单测 | 中文数字转换（覆盖到万位）；目录剥离（含「有目录 / 无目录 / 无条文」三类）；头部解析；条号抽取 |
 | 集成 | 样本语料走完整 pipeline，校验 PG 元数据与 Milvus `content` 前缀 |
 | 端到端 | 语义查询命中正确法条；「民法典第146条」词法命中；`top_k` 边界（请求 10 条但只有 3 条时返回 3 条） |
-| 评测 | 用 Phase 0 的评测集跑 `evaluate_retrieval.py`，产出 top-5 命中率 |
+| ~~评测~~ | 评测集本期不做（见 §1 暂缓）。`evaluate_retrieval.py` 保留为后续补建时的现成工具 |
 | 回归 | 改动前后对既有查询的召回结果对比 |
 | 前端 | 菜单可直达全局库维护页；品牌文案无残留 |
 
@@ -772,7 +798,7 @@ Authorization: Bearer sk-xxx
 
 | 阶段 | 产出 | 依赖 |
 |------|------|------|
-| M0 | 契约冻结 + 评测集 + 基线 | — |
+| M0 | 契约冻结 + 回归基线（评测集已延后） | — |
 | M1 | 入库结构化可用（含目录剥离与条号归一） | M0 |
 | M2 | 检索接口改造完成 | M1 |
 | M3 | 全局库引导与入口 | M2 |
@@ -792,7 +818,7 @@ M0–M2 硬串行，M3–M5 可并行。
 | 3 | 全新部署，不带存量数据，无迁移 |
 | 4 | 检索以语义为主；不做法条精确过滤车道 |
 | 5 | **检索接口就是现有 `/api/retrieval/search`**，改造为默认带上全局法条库 |
-| 6 | 全局库全平台一个，自动带上；个人库由下游传 `kb_ids` |
+| 6 | 全局库**全租户**一个，自动带上；个人库由下游传 `kb_ids` |
 | 7 | 不做逐用户鉴权，不做跨租户例外；Key 只承担接口调用权限 |
 | 8 | `top_k` 字段名不变，本部署默认值 5 |
 | 9 | 不做批量端点 |
@@ -825,3 +851,5 @@ M0–M2 硬串行，M3–M5 可并行。
 - 每份英文 Note 配一份同名 `.zh.md`；日期取首次提出日
 
 验证命令：后端 `backend/` 下 pytest、前端 `frontend/` 下 build / 测试、协议变更同步 `artoo-open-api.md`、部署变更跑 compose 校验。**只报告实际执行过的命令与结果。**
+
+> **本期不实际运行验证**（已确认）：改造以「代码改动 + 提交」为准，不启动服务、不跑全量测试与构建。上面列的是将来做实际验证时的命令，本期不作为交付判据。
