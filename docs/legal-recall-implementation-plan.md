@@ -273,7 +273,8 @@
 - **收益**：无存量迁移、数据结构可自由演进、全局库可在引导时一次创建
 - **代价**：fork 会与上游分叉，而上游 `9ilfoyl3/artoo` 仍在活跃演进。改造必然触碰共享文件（`pipeline/pipeline.py`、`api/retrieval.py`、`api/documents.py`、前端 `Layout.tsx` / `App.tsx` / `Landing.tsx`）
 - **约束**：专属逻辑尽量落在新文件；共享文件只做最小插入；**把上游配成 `upstream` remote 并定期 fetch + 合并**（`git remote add upstream https://github.com/9ilfoyl3/artoo.git`）；fork 即长期产品线的上游，不计划向原仓库提 PR
-- **一个操作上的前提**：改造要在 fork 的本地克隆里进行。当前工作区 `C:\newHLSWorkspace\aladdin` 是上游的克隆，**不是** fork；需要先确定 fork 克隆到哪个目录，或把当前工作区指向 fork
+- **本地工作仓库（已就绪）**：fork 为 `gf3532690/artoo-legal`，本地克隆在 `C:\newHLSWorkspace\artoo-legal`；`origin` 指向 fork、`upstream` 指向原仓库 `9ilfoyl3/artoo`，工作分支 `develop`（基线 `3c184f5`，其上已有方案文档提交）。改造全部在这个仓库内进行，**不动**上游克隆 `C:\newHLSWorkspace\aladdin`
+- **注意**：GitHub 对同一账号 + 同一仓库只允许一个 fork。原有一个 2026-05-19 的陈旧 fork（名为 `aladdin`，对应项目旧名）已按无独有提交核实后**改名为 `artoo-legal`**并同步到上游最新状态——效果等同于重建，且不需要删库权限
 
 ### D9 · UI 标识与术语：改展示层，不改契约层
 
