@@ -141,10 +141,10 @@
 | 现有评测集 | 仅 5 条 query，按 `expected_keywords` 判命中，`expected_doc_ids` 全空 | `app/scripts/eval_sets/large-kb-legal-sample.json` |
 | 仓库规范 | 非平凡变更必须同 PR 提交 Agent Note（英文 + `.zh.md`） | `AGENTS.md` |
 
-> **动手前必须知道：测试与评测工具都不在版本管理内。** `.gitignore` 第 77–84 行明确忽略 `backend/tests/`（注释：「本地测试文件，不纳入版本管理」）与 `backend/app/scripts/`（「内部评估/性能测试脚本」），另有 `backend/_e2e_*.py`。由此产生四个必须处理的后果：
+> **上游原本把测试与评测工具排除在版本管理之外，本 fork 已改为纳入。** `.gitignore` 原文注释即「本地测试文件，不纳入版本管理」与「内部评估/性能测试脚本」，另忽略 `backend/_e2e_*.py`。由此产生四个必须知道的事实：
 >
-> 1. **新克隆里既没有测试套件、也没有评测 harness。** 本机 `aladdin` 的 `backend/tests/` 有 155 个文件（可收集 524 个用例），`backend/app/scripts/` 有 7 个文件（含 `evaluate_retrieval.py` 与 `eval_sets/`）。这两份已复制进本 fork 的工作区，否则 §10 的验证策略与 §8.1 第 12 项都无从谈起。
-> 2. **Phase 0 要补的回归测试若写进 `backend/tests/`，会被 gitignore 挡在提交之外**——测试写了但永远不进仓库。二选一：在 fork 里放开该忽略规则（**建议**，长期产品线理应由产品自带测试），或把新测试放到被跟踪的目录。
+> 1. **上游的新克隆里既没有测试套件、也没有评测 harness。** 本机 `aladdin` 的 `backend/tests/` 有 **50 个源文件**（49 个 `.py` + 1 个 `_base.txt`，可收集 524 个用例；另有 105 个 `__pycache__` 字节码缓存不计），`backend/app/scripts/` 有 **4 个源文件**（`__init__.py` / `evaluate_retrieval.py` / `measure_load_overhead.py` / `eval_sets/large-kb-legal-sample.json`）。
+> 2. **本 fork 已把这两处改为纳入版本管理**（`.gitignore` 已放开，提交 `37cf5e0`）。所以在**本 fork 内**把回归测试写进 `backend/tests/` 会被正常提交，不存在"写了却进不去仓库"的问题；但**从上游同步时要注意**——上游对这些路径的改动不会带来测试变化。
 > 3. **本机测试基线并非全绿。** 524 个用例可收集，但有 6 个文件因引用已删除/改名的模块而收集失败：`test_content_router.py`、`test_e2e_session_upload.py`、`test_final_answer_parse.py`、`test_json_field_extractor.py`、`test_milvus_session_files.py`、`test_thinking_dialect.py`。它们是**既有陈旧文件**、不在本次改造范围内；将来跑 pytest 需用 `--ignore` 排除或先清理，否则收集错误会中断整轮。
 > 4. **Python 环境用 conda 的 `aladdin` 环境（3.12.13）**，不是仓库内的 `.venv`（3.13.11，与项目要求的 3.12 不符）。前端 `npm ci` 已在本 fork 工作区装好，`npm run build` 实测通过。
 
@@ -652,7 +652,7 @@ Authorization: Bearer sk-xxx
 | 9 | 内容维护 | `api/document.py` + `api/knowledge_base.py` 全套 |
 | 10 | 前端能力开关 | `/api/system/frontend-config` + `useGraphGating.ts` 的现成门控模式 |
 | 11 | 引导框架 | `auth/bootstrap.py::run_bootstrap`（幂等） |
-| 12 | 评测工具 | `app/scripts/evaluate_retrieval.py`（不用新建）。**该目录被 `.gitignore` 忽略**，新克隆里没有，需从本机复制 |
+| 12 | 评测工具 | `app/scripts/evaluate_retrieval.py`（不用新建）。上游忽略该目录，**本 fork 已纳入版本管理**（见 §3 注） |
 | 13 | BM25 内容增强 | `content` 的 `[前缀]` 机制（扩展它做条号归一） |
 
 ### 8.2 需改现有代码
