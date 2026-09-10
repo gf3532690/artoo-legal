@@ -87,6 +87,13 @@ class TenantTypeEnum(str, Enum):
 EXTERNAL_USER_TENANT_ID = "tenant-external-builtin"
 EXTERNAL_USER_TENANT_NAME = "外部用户租户"
 
+# 法条库部署（单租户）：唯一默认租户。全局法条库与个人库都落在它里面，
+# 全局库由该租户的管理员维护。见 docs/legal-recall-implementation-plan.md 的 D4。
+DEFAULT_LEGAL_TENANT_ID = "tenant-legal-default"
+DEFAULT_LEGAL_TENANT_NAME = "法条库"
+# 全局法条库的展示名（可被管理员改名，识别靠 config 标记而非名称）。
+DEFAULT_LEGAL_KB_NAME = "全局法条库"
+
 # 请求头：超管级代理 Key 携带的外部用户标识
 HEADER_EXTERNAL_USER_ID = "X-External-User-Id"
 # 请求头：目标租户入口（归属校验）

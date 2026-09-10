@@ -42,7 +42,10 @@ import { useArtifactStore } from '@/stores/artifactStore'
 // - platform：平台菜单（租户管理），仅 Super_Admin 可见。
 // 审计日志归 manage（admin 可见），但 Super_Admin 经下方 SUPER_ADMIN_MENUS 单独放行。
 const navItems = [
-  { to: '/knowledge-bases', label: '知识库', icon: Database, group: 'content' },
+  // 法条库部署：入口直达全局法条库的内容维护页（仅租户管理员可见）。
+  // 取代上游的「知识库」列表入口——本产品线的库范围由下游决定，
+  // 管理员只需要维护全局法条库。
+  { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
   { to: '/agent-config', label: '智能体', icon: Bot, group: 'content' },
   { to: '/skills', label: '技能', icon: Sparkles, group: 'content' },
   { to: '/retrieval', label: '检索测试', icon: Search, group: 'capability' },

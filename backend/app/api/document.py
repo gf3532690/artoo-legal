@@ -251,6 +251,9 @@ class DocumentResponse(BaseModel):
     progress_message: str | None = None
     source_url: str | None = None
     created_at: str
+    # 法条库：该文档解析出的法名。人工换版时用于识别"同一部法的两份文档"。
+    # 非法条文档或尚未解析完成时为 null。
+    law_name: str | None = None
 
 
 class ChunkResponse(BaseModel):
@@ -468,6 +471,34 @@ async def list_documents(
         .limit(page_size)
     )
     docs = result.scalars().all()
+
+    # 法条库：批量取每份文档的 **第一个子块** 的 chunk_metadata，读出法名。
+    # 每个文档只取一行（按 chunk_index 最小值），避免把整库 chunk 都拉出来。
+    doc_law_names: dict[str, str] = {}
+    if docs:
+        from app.schema.db import Chunk
+
+        doc_ids = [d.id for d in docs]
+        first_chunk = (
+            select(
+                Chunk.doc_id.label("doc_id"),
+                func.min(Chunk.chunk_index).label("min_index"),
+            )
+            .where(Chunk.doc_id.in_(doc_ids))
+            .group_by(Chunk.doc_id)
+            .subquery()
+        )
+        meta_rows = await db.execute(
+            select(Chunk.doc_id, Chunk.chunk_metadata).join(
+                first_chunk,
+                (Chunk.doc_id == first_chunk.c.doc_id)
+                & (Chunk.chunk_index == first_chunk.c.min_index),
+            )
+        )
+        for doc_id, meta in meta_rows.all():
+            if isinstance(meta, dict) and meta.get("law_name"):
+                doc_law_names[doc_id] = meta["law_name"]
+
     items = [
         DocumentResponse(
             id=d.id,
@@ -482,6 +513,7 @@ async def list_documents(
             progress_message=d.progress_message,
             source_url=d.source_url,
             created_at=d.created_at.isoformat() if d.created_at else "",
+            law_name=doc_law_names.get(d.id),
         )
         for d in docs
     ]

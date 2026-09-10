@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Documents from './pages/Documents'
 import KnowledgeGraph from './pages/KnowledgeGraph'
+import LegalLibrary from './pages/LegalLibrary'
 import Chat from './pages/Chat'
 import Retrieval from './pages/Retrieval'
 import ApiKeys from './pages/ApiKeys'
@@ -67,6 +68,8 @@ function App() {
       <Route path="/register" element={<Register />} />
       <Route path="/change-password" element={<ChangePassword />} />
       <Route path="/invite/:token" element={<InviteAccept />} />
+      {/* 法条库部署：入口直达全局法条库的内容维护页（不新增检索端点）。 */}
+      <Route path="/legal" element={<LegalLibrary />} />
       <Route
         element={
           <RequireAuth>

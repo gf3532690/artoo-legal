@@ -99,8 +99,16 @@ function ToolbarTip({
 }
 
 // 文档管理页面 - Finder 风格
-function Documents() {
-  const { id: kbId } = useParams<{ id: string }>()
+/**
+ * 知识库内容维护页。
+ *
+ * 默认从路由参数取库 id（`/knowledge-bases/:id`）；法条库入口（`/legal`）不经该
+ * 路由，因此支持通过 `explicitKbId` 显式传入目标库 id。
+ */
+function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
+  const { id: routeKbId } = useParams<{ id: string }>()
+  // 法条库入口（/legal）不经过 /knowledge-bases/:id，由页面显式传入目标库 id。
+  const kbId = explicitKbId ?? routeKbId
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -628,6 +636,7 @@ function Documents() {
       chunk_count: doc.chunk_count,
       progress: doc.progress ?? 0,
       progress_message: doc.progress_message ?? null,
+      law_name: doc.law_name ?? null,
       isLocal: false,
     })),
     ...uploadingFiles

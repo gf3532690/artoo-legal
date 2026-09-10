@@ -23,6 +23,8 @@ export interface DocumentItem {
   progress_message: string | null
   created_at: string
   folder_id?: string | null
+  /** 法条库：该文档解析出的法名；人工换版时用于识别"同一部法的两份文档"。 */
+  law_name?: string | null
 }
 
 // 本地上传中的文件
@@ -45,6 +47,8 @@ export interface MergedFile {
   progress: number
   progress_message: string | null
   isLocal: boolean
+  /** 法条库：解析出的法名（上传中的本地文件没有）。 */
+  law_name?: string | null
 }
 
 interface FileItemProps {
@@ -283,6 +287,16 @@ function FileItem({ doc, isSelected, onSelect, onRetry }: FileItemProps) {
       <p className="text-[9px] text-muted-foreground mt-0.5">
         {formatSize(doc.file_size)}
       </p>
+
+      {/* 法条库：显示解析出的法名，便于人工换版时发现同名文档 */}
+      {doc.law_name && (
+        <p
+          className="mt-0.5 w-full px-0.5 text-[9px] leading-tight text-muted-foreground line-clamp-1"
+          title={doc.law_name}
+        >
+          {doc.law_name}
+        </p>
+      )}
     </div>
   )
 }

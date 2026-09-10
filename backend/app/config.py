@@ -202,6 +202,15 @@ class Settings(BaseSettings):
     super_admin_username: str = ""
     super_admin_password: str = ""
 
+    # 法条库部署（单租户）的默认租户与租户管理员。
+    # 首次引导时据此幂等创建唯一默认租户、该租户的管理员，以及全局法条库
+    # （owner 指向该管理员、visibility=organization + org_permission=read）。
+    # 与 SUPER_ADMIN_* 不同：这里缺失**不** fail-fast——部署可能由超管经管理端点
+    # 手工建租户与账号；此时只记 warning，全局库的 owner 留空（可读不可写）。
+    legal_tenant_admin_username: str = ""
+    legal_tenant_admin_password: str = ""
+    legal_tenant_name: str = "法条库"
+
     # 注册模式（env 可配置）：
     #   invite_only（默认）—— 关闭自助注册：登录页无注册入口，/api/auth/register 返回 403；
     #     建号仅由租户管理员在本租户内创建，或经邀请链接。

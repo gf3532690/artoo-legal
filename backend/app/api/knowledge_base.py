@@ -574,6 +574,49 @@ async def create_knowledge_base(
     return _to_resp(kb, 0)
 
 
+@router.get("/legal/global", response_model=KnowledgeBaseResponse)
+async def get_global_legal_kb(
+    identity: IdentityContext = Depends(require_authenticated()),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """返回全局法条库（本部署单租户，正常只有一个）。
+
+    供前端「法条库」入口解析目标库：菜单点进去直接落到该库的内容维护页。
+    权限沿用与「知识库详情」完全相同的判定——全局库是 organization + read，
+    同租户身份自然可读；不存在的库与无权限的库都返回 404（存在性不泄露）。
+
+    路径放在 ``/{kb_id}`` 之前声明：虽然两段路径不会真的冲突，但把静态段放前面
+    可以让路由表读起来更明确。
+    """
+    from app.retrieval.legal_scope import _is_default_legal_kb
+
+    rows = await db.execute(select(KnowledgeBase.id, KnowledgeBase.config))
+    kb_id = next(
+        (kid for kid, config in rows.all() if _is_default_legal_kb(config)), None
+    )
+    if kb_id is None:
+        raise CrossTenantError()
+
+    kb = await db.get(KnowledgeBase, kb_id)
+    if kb is None:
+        raise CrossTenantError()
+    await _authorize_kb(db, identity, kb, KbAccessEnum.READ)
+    grants = await _load_grants(db, kb.id)
+    write_decision = kb_authorization_decision(
+        identity,
+        kb_id=kb.id,
+        kb_tenant_id=kb.tenant_id,
+        kb_owner_user_id=kb.owner_user_id,
+        kb_visibility=kb.visibility,
+        kb_org_permission=kb.org_permission,
+        access=KbAccessEnum.WRITE,
+        grants=grants,
+    )
+    return _to_resp(
+        kb, can_write=write_decision.allow, capacity=await _build_capacity(db, kb)
+    )
+
+
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def get_knowledge_base(
     kb_id: str,
