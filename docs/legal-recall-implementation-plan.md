@@ -1,0 +1,824 @@
+# 法条召回服务 · 落地方案
+
+> 状态：设计已冻结，待进入实现
+> 代码基线：`develop @ 3c184f5`
+> 本文为唯一有效版本，替换此前各版讨论稿
+
+---
+
+## 前提（读前必读）
+
+1. **Fork 仓库改造，不切新分支。** 将 `9ilfoyl3/artoo` fork 成独立仓库后，直接在 fork 里改造。上游仍在活跃演进，因此共享文件的改动要尽量小，并定期从 upstream 同步。
+2. **两个应用完全独立部署。** Artoo 与法条库各自独立部署、互不干涉。Artoo 保留其全部原有能力；法条库是独立的精简应用。
+3. **全新部署，不带存量数据。** 没有存量迁移、没有租户回填，数据存储可按目标结构直接建。
+4. **定位收敛为法条召回。** 不做运行时 LLM 生成问答，不做引用图谱。
+
+这四条前提决定了后面几乎所有取舍：删什么留什么、要不要写迁移脚本、能不能自由改结构、UI 标识怎么改。
+
+---
+
+## 0. 目标
+
+把 Artoo 改造成一个**法条召回服务**：入库阶段把法条结构化（法名、条号），运行阶段只做检索，返回**能定位到具体法条**的结果。
+
+检索以**语义检索为主**：用查询内容在法条正文上做语义匹配，命中后返回对应的法名与条号。调用方也可以直接输入「法条名 + 条号」来查，法条名不要求精确。
+
+### 0.1 相对 Artoo 的全部差异
+
+因为检索接口就是同一个 `/api/retrieval/search`，这里把全部差异一次列清——**其余部分完全相同，不做任何改动**。
+
+| 维度 | Artoo | 法条库 |
+|------|-------|--------|
+| 检索算法 | Dense + Sparse + BM25 → RRF → Rerank → MMR → 父块扩展 | **完全相同**（同一套代码） |
+| 检索接口 | `/api/retrieval/search` | **同一个接口** |
+| 检索目标 | 调用方传什么查什么 | 调用方传的 + **自动带全局法条库** |
+| 结果元数据 | `parent_id` / `chunk_index` / `element_type` 等 | 追加 `law_name` / `article_number` / `source` |
+| `top_k` 默认值 | 10 | 5 |
+| 切分器 | 自动路由到 `naive` | 显式 `chunker_type=laws` |
+| 入库元数据 | 章节路径 `section_path`、页码、元素类型 | 追加 法名 / 条号 / 款项；**剥离目录** |
+| Milvus `content` 前缀 | `[文件名] 正文` | `[法名 第N条] 正文`（供 BM25 匹配阿拉伯数字条号） |
+| 无条文结构文档 | 整篇一个父块、按行切子块 | 按「一、」切父块（D11） |
+| 会话附件 | 有 | 删除 |
+| Chat / Agent / MCP / Skills | 有 | 删除 |
+| 租户模型 | 多租户 + 外部用户租户 | **单租户** |
+| 知识图谱 | 可选（`GRAPH_ENABLE`） | 不做 |
+| 时效性 | 无 | 无（暂缓） |
+| 评测 | harness + 5 条样本 | 复用 harness，不建评测集 |
+| UI | 完整产品面 | 品牌与术语改为「法条库」，菜单精简 |
+
+**结论：差异几乎全在「入库时把内容变成什么形态」这一侧，检索算法侧只有三处最小增量**（自动带全局库、结果补法条字段、`top_k` 默认值）。这也解释了为什么 §8.3「必须新写」的清单只有 6 项，且全部落在入库路径上。
+
+**由此推出两条工程含义**：
+
+1. Artoo 侧对检索算法的任何改进（rerank 参数、召回配置等）都**免费**惠及法条库——前提是 fork 持续从 upstream 同步（见 D8）。
+2. 反过来，如果法条库的召回质量不达预期，**可调的杠杆在语料与入库，不在算法**：改分块参数、改元数据抽取、改目录剥离规则，而不是去改 RRF 或 rerank。
+
+---
+
+## 1. 范围边界
+
+### 做
+
+- **改造现有检索接口**：`POST /api/retrieval/search` 默认带上全局法条库，与调用方传入的个人库 `kb_ids` 一起检索。**不新增检索端点。**
+- 法条结构化入库：法名、条号抽取（含中文数字 → 阿拉伯数字）
+- 目录剥离：入库时移除「目录」区，避免导航文本变成可检索片段
+- 条号数字形态归一：让「民法典第146条」能命中正文写作「第一百四十六条」的内容
+- 删除非召回链路（Chat / Agent / MCP / Skills / 会话附件）
+- UI 标识与术语改为「法条库」
+
+### 不做
+
+- 运行时 LLM 生成与多轮对话
+- 引用图谱（原 P3，本期整体砍掉）
+- 精确过滤车道与 `legal_filters`
+- 批量检索端点
+- 法条专属的增删改接口（内容维护全部复用现有知识库 / 文档接口）
+- 运行时 LLM 抽取（法名与条号均为确定性提取）
+
+### 暂缓（设计保留，本期不做）
+
+- **法条时效性**（`legal_status` / `effective_date` / `expiry_date` / `superseded_by`）：本期不落字段、不参与过滤。过渡期建议入库时仍把正文里能解析到的施行日期写入 PG `chunk_metadata`，将来启用不必重新解析。
+- **评测集**：已确认本期不做。影响是"改造是否有效"暂时无法用数据证明，验证只能依赖单测 / 集成 / 端到端与人工抽查。将来补建时优先从真实检索日志抽样。
+- **法律修订的自动替换**：已确认本期由维护者在界面上**人工删除旧文档 + 上传新版**，不做按 `law_name` 自动替换。
+
+---
+
+## 2. 语料事实（实测）
+
+对样本语料（`法律法规/法律/`）逐文件统计所得，是所有分块与解析决策的依据。
+
+| 项 | 实测值 |
+|---|---|
+| 文件数 | 347（345 `.docx` + 2 `.doc`），可解析文本的 346 个已全量统计 |
+| 命名约定 | `<法名>_<YYYYMMDD>`，346/346 全部符合——**但不作为权威来源** |
+| 同名多版本 | 0 个（去掉日期后无重名） |
+| 总文本量 | 2,791,399 字 |
+| 文档长度 | 中位数 6,517 字，P90 14,600，最长《民法典》108,593 字 |
+| 行首 `第X条` 总数 | **22,610**（平均每条 **123 字**） |
+| 行首 `一、` 条目总数 | 413 |
+| 含独立「目录」行的文件 | **264 / 346（76.3%）**；目录区合计 **2,988 行**，平均每文件 11.3 行 |
+| 完全无行首 `第X条` 的文件 | **37 个** `.docx`（另有 2 个 `.doc` 疑似同类，需转换后确认），合计 917 行 |
+| 头部日期行 | **345/345 都能解析出「YYYY年M月D日」**（无例外）；括号风格 344 个用全角「（」，1 个用半角「(」 |
+| 行首「（一）」层级 | 283/345 文件含该层级（条文内部的**项**） |
+| 上述两类的交集 | **0** |
+| 容量上限 | `kb_chunk_cap` 默认 1,000,000 |
+| 预估 child chunk 总量 | 约 27,800（含目录区），占上限约 2.8% |
+
+**三条由数据直接得出的结论：**
+
+1. **分块参数保持默认。** 平均每条 123 字，远低于 `child_chunk_size`（450）。绝大多数条文就是「一个父块 + 一个子块」，`overlap` 几乎不触发。`parent_chunk_size` 无需调大。
+2. **容量不是问题。** 约 2.78 万 chunk 对 100 万的上限，占 2.8%。
+3. **语料不是单一形态。** 存在两类非标准结构，见 D10 与 D11。
+
+---
+
+## 3. 现状基线（已逐项核对源码）
+
+| 能力 | 现状 | 位置 |
+|------|------|------|
+| 对外检索接口 | `POST /api/retrieval/search`（对外推荐）与 `/test`（前端），同一底层实现 | `api/retrieval.py` |
+| 请求模型 | `query` / `knowledge_base_id` / `kb_ids` / `session_id` / `mode` / `top_k=10` | `api/retrieval.py::RetrievalTestRequest` |
+| 响应信封 | `query / mode / total / elapsed_ms / results / trace / degraded / failed_source_count` | `api/retrieval.py::RetrievalTestResponse` |
+| 单条结果模型 | 含 `metadata: dict`（已在下发） | `api/retrieval.py::RetrievalResultItem` |
+| 结果水合 | 已有「收集 doc_ids → 一次批量查 → 拼装」的批量水合模式 | `api/retrieval.py::_build_result_items` |
+| 多源检索 | 各源同权（`priority=1.0`）、统一 rerank、支持每源独立 `expr` | `retrieval/multi_kb.py::MultiKBRetriever` |
+| 检索器装配 | Dense + Sparse + BM25（+ 可选图谱第四路） | `retrieval/factory.py::build_hybrid_retriever` |
+| BM25 内容增强 | 写入 Milvus 的 `content` 带 `[文件名]` 前缀 | `pipeline/pipeline.py` ≈L683 |
+| 切分器路由 | `csv/xlsx → table`，**其它一律 `naive`**；`laws` 仅在 KB config 显式指定时生效 | `pipeline/chunker_router.py` |
+| 分块参数 | 仅 `naive` 接收 `parent_size` 等参数 | `pipeline/pipeline.py::_select_chunker` |
+| 大小护栏 | 对**所有** chunker 统一生效，按租户配置取上限 | `pipeline/pipeline.py` → `chunker.py::enforce_size_limits` |
+| 法条切分器 | `LawsChunker` 按「第X条」与判决结构切父块，无 size 控制 | `pipeline/chunkers/laws.py` |
+| 元数据抽取 | `ChunkMetadata`（含 **`section_path`** 章节路径） | `pipeline/metadata.py` |
+| 富化器 | `Enricher` 是**文本** pass-through（收 `list[str]`） | `pipeline/enricher.py` |
+| Chunk 元数据落库 | `chunk_metadata` JSON 列，写入用 `asdict(meta)` | `schema/db.py`、`pipeline/pipeline.py` |
+| 存储拓扑 | 所有知识库共用一张物理表（按维度分表），`kb_id` 为 Partition Key | `storage/milvus.py` |
+| .doc 支持 | `DocLoader` 经 LibreOffice 转 `.docx`；Docker 镜像已装 | `pipeline/loaders/doc_loader.py`、`backend/Dockerfile` |
+| 建库逻辑 | 盖章 `tenant_id` + `owner_user_id`，`require_member()` | `api/knowledge_base.py` |
+| 文档维护接口 | `POST /api/knowledge-bases/{kb_id}/documents/upload` 等全套 | `api/document.py` |
+| 前端能力开关 | 公开端点下发 `graph_enabled`，前端据此决定入口显隐 | `api/system.py::/frontend-config` |
+| 前端超管路由白名单 | `SUPER_ADMIN_ALLOWED_PATHS` 为**精确匹配**，不在集合内即重定向 `/tenants` | `components/Layout.tsx` |
+| 评测工具 | B5 Evaluation_Harness，复用 `search_with_trace`，支持 before/after 对比 | `app/scripts/evaluate_retrieval.py` |
+| 现有评测集 | 仅 5 条 query，按 `expected_keywords` 判命中，`expected_doc_ids` 全空 | `app/scripts/eval_sets/large-kb-legal-sample.json` |
+| 仓库规范 | 非平凡变更必须同 PR 提交 Agent Note（英文 + `.zh.md`） | `AGENTS.md` |
+
+---
+
+## 4. 业务逻辑
+
+### 4.1 两级库与职责边界
+
+**租户模型：单租户。** 法条库应用有且只有一个默认租户，全部知识库（1 个全局 + N 个个人）都在这个租户内。
+
+| 角色 | 职责 |
+|------|------|
+| Super_Admin | 平台装配：建租户、配模型 / Embedding / OCR、签发 API Key。**不参与法条内容维护** |
+| 默认租户管理员 | **维护全局法条库**（上传 / 删除 / 人工替换） |
+| 调用方 | 用绑定默认租户的 Key 调检索接口，库范围由 `kb_ids` 参数决定 |
+
+| 维度 | 全局法条库 | 个人库 |
+|------|-----------|--------|
+| 数量 | 全租户 1 个 | 由下游自行管理 |
+| 维护 | 默认租户管理员经后台 | 下游按 `kb_id` 经现有 API |
+| 检索时 | **自动带上，无需调用方传** | 由调用方在 `kb_ids` 里传入 |
+| 权限判定 | 不做（见 D4） | 不做（见 D4） |
+
+**下游（law-agent-lite-backend）承担「谁能看哪些库」的业务规则**：它用自己的用户权限与关联表算出应取哪些个人库，把 `kb_ids` 传进来。法条库不干涉这件事——Key 只是"能不能调这个接口"，调什么内容由参数决定。
+
+**Key 选型（已验证身份构造）**：调用方用**绑定默认租户的 `user_level` Key**（`apikey_auth.py` 中 `_auth_user_level` 取 `tenant_id=api_key.tenant_id` 并带绑定用户主体）。这样它能读到 `own_ids`（自己创建的个人库）∪ `public_ids`（全局库 `organization` + `read`）。**不使用 `external_agent` 通道**——它的 `tenant_id` 被硬锁在内置 `External_User_Tenant`，与"单租户"前提冲突。
+
+### 4.2 检索链路
+
+```
+下游 → POST /api/retrieval/search
+   │        body：query / kb_ids（个人库，可空） / top_k（默认 5）
+   ├─ 解析目标库：全局法条库 id（固定，自动加入） + 调用方传入的 kb_ids
+   ├─ 检索：MultiKBRetriever 并行检索各源 → 各源同权 → RRF → Rerank → MMR → 父块扩展
+   ├─ 水合：扩展现有批量水合，补 law_name / article_number
+   └─ 返回：沿现有响应信封
+```
+
+### 4.3 入库链路
+
+```
+上传 → Loader（.doc 经 LibreOffice）→ OCR（仅当文档含嵌入图片）
+     → 【文档级预处理：目录剥离 + 法名解析】   ← 必须在 Chunker 之前
+     → Chunker(laws) → enforce_size_limits(按租户分块参数)
+     → Enricher(现有，pass-through) → MetadataExtractor(章节路径等)
+     → LegalMetadataExtractor(新增：条号抽取) → Embedder
+     → Indexer ─┬→ Milvus：向量 + content（含法名与阿拉伯数字条号前缀）
+                └→ PostgreSQL：chunk_metadata JSON（法条字段）
+```
+
+> **顺序要点**：目录剥离会改变文本，**必须在切分之前做**——否则目录行早已被切成 chunk 并写入索引，再剥就晚了。法名解析是文档级信息，同层处理。早先稿子把「目录剥离」列在切分之后的抽取器里，是错的。
+
+---
+
+## 5. 关键设计决策
+
+### D1 · 法条元数据只落 PG，不动 Milvus schema
+
+因为本期**不做过滤**（语义检索为主），Milvus 侧不需要法条标量字段——它们只需要作为**输出**返回。
+
+做法：检索后扩展现有的批量水合（`_build_result_items` 已经在批量查文件名），再按 `chunk_id` 批量查 `Chunk.chunk_metadata`，取出 `law_name` / `article_number` 放进结果。
+
+这样**完全不需要改 Milvus schema**：不动 `_build_fields`、不动 `_SCALAR_INDEXES`，也就不存在"会话 collection 被同步加空列"这类副作用。
+
+> 与早先讨论稿的差异：原稿打算把法名 / 条号写进 Milvus 标量字段并建索引。取消精确过滤车道后，这一整块不再必要。代价是每次检索多一次批量 PG 查询（`top_k=5` 时开销可忽略）。
+
+### D2 · 新增独立抽取器，命名避开现有 `Enricher`
+
+法条抽取不塞进 `LawsChunker`：`ChunkResult` 是所有 chunker 共享结构，往里加字段会外溢；`article_number` 是父块级属性，需经 `parent_child_map` 下发。
+
+**命名注意**：`pipeline/enricher.py::Enricher` 已存在，语义是「对 chunk 文本做摘要 / 关键词富化」（收 `list[str]`、返回 `list[str]`，当前 pass-through）。不要复用该名字。建议命名 `LegalMetadataExtractor`，放在 `pipeline/legal_metadata.py`。
+
+### D3 · 法条库显式指定 `chunker_type=laws`
+
+`ChunkerRouter.select()` 对非表格文档一律返回 `naive`，`laws` 仅在 KB `config.chunker_type` 显式指定时生效。两级库都在创建时带上该标记，用户无感。
+
+补充：`_select_chunker` 只把分块参数传给 `naive`；但 `enforce_size_limits` 对所有 chunker 统一生效，因此分块参数对法条库同样有效。
+
+### D4 · 单租户模型：不做跨租户例外，也不做逐用户鉴权
+
+已确认法条库是**单租户部署**（有且只有一个默认租户），全局库与所有个人库都在其中。因此：
+
+- **不需要跨租户例外**——早先稿子里「注入 `cross_tenant_kb_ids` 放行全局库」这一整节取消
+- **不需要逐用户鉴权**——调用哪些库由参数决定
+- 全局库用 `visibility=organization` + `org_permission=read`：同租户身份自然可读，**零鉴权代码**
+
+**一处重要更正**：早先稿子写「Super_Admin 登录后台维护全局库」。这在现有代码里**走不通**：
+
+- `kb_authorization_decision` 的第一判定是跨租户硬隔离，而 Super_Admin 的 `tenant_id` 为 `None`，`None != "t1"` 恒成立 → 任何 KB 都返回 404
+- `assemble_allowed_kb_ids` 对 platform 身份直接返回空集（注释原文：「内容检索不属其职权，受内容边界约束」）
+- 前端 `SUPER_ADMIN_MENUS` 不含 `/knowledge-bases`，注释写明「超管无租户上下文、不参与内容」
+
+**超管在设计上就是不参与内容的**（前后端一致）。所以维护者改为**默认租户的管理员**——它是一个普通业务身份，走现有的 owner 放行逻辑，不需要任何鉴权例外。Super_Admin 仍然存在，但只承担平台装配（建租户、配模型、签发 Key）。
+
+### D5 · 检索以语义为主，本期不做精确过滤车道
+
+调用方可以输入「法条名 + 条号」，但**这不是过滤条件**，而是查询文本——由语义与词法检索去匹配。因此：
+
+- 不新增 `legal_filters` 字段
+- 不做法名精确匹配（避免「库里存全称、用户说简称 → 静默返回空」这类失败）
+- 结果里返回 `law_name` / `article_number`，供调用方判断命中是否正确
+
+将来若真实查询分布显示精确条号查询占比高，再考虑补精确车道——那时需要先做法名规范化与别名映射。
+
+### D6 · 两库合并直接复用 `MultiKBRetriever`
+
+全局库 + 个人库并列作为检索源，各源同权、统一 rerank，按 rank 分合并排序。`MultiKBRetriever` 本就是这套语义，且支持每源独立 `expr`；`api/retrieval.py::_run_multi_source_retrieval` 是现成用法。
+
+**已知取舍（明确接受）**：个人库内容质量不可控，同权合并下可能排在权威法条之前。缓解手段是结果带来源标记，下游可自行取舍。
+
+**来源标注（已定）**：每条结果的来源写进已有的 `metadata`，字段名 `source`，取值 `"global"` / `"personal"`。不改响应模型——`RetrievalResultItem` 已经在下发 `metadata`。
+
+### D7 · 非召回链路：真正删除
+
+因为 Artoo 作为独立应用继续存在，删除法条库应用里的这些链路**不会影响任何下游**：
+
+`app/agent/**`、`app/api/chat.py`、`app/mcp/**`、`app/mcp_server.py`、`app/api/mcp_config.py`、`app/api/skills.py`、`app/api/agent_config.py`、`app/session_upload/**`、`app/api/session_upload.py`、`app/api/session.py`
+
+以及前端对应页面与路由。
+
+**删除前必须处理的两处耦合**（按目录删会炸掉别的东西）：
+
+1. `session_upload/limits.py` **不是会话专属**——它是普通上传的容量校验器，被 `api/document.py` 与 `pipeline/pipeline.py` 依赖。必须先挪到中立位置（如 `app/pipeline/limits.py`）再删 `session_upload/`。
+2. `api/retrieval.py` 引用了 `session_upload.service`（会话附件作为检索源）。删除会话附件事务后，需一并移除该分支。
+
+**不再需要处理的一项**：`_get_llm_for_request` 原本被图谱抽取依赖，但引用图谱已砍（见 §1），因此本次删除不需要抽出这个函数。若入库 LLM 补抽也不做（本期不做），法条库应用**不含任何 LLM 调用**。
+
+### D8 · Fork 带来的工程约束
+
+前提见文首。由「Fork 仓库 + 全新部署」推出的结论：
+
+- **收益**：无存量迁移、数据结构可自由演进、全局库可在引导时一次创建
+- **代价**：fork 会与上游分叉，而上游 `9ilfoyl3/artoo` 仍在活跃演进。改造必然触碰共享文件（`pipeline/pipeline.py`、`api/retrieval.py`、`api/documents.py`、前端 `Layout.tsx` / `App.tsx` / `Landing.tsx`）
+- **约束**：专属逻辑尽量落在新文件；共享文件只做最小插入；**把上游配成 `upstream` remote 并定期 fetch + 合并**（`git remote add upstream https://github.com/9ilfoyl3/artoo.git`）；fork 即长期产品线的上游，不计划向原仓库提 PR
+- **一个操作上的前提**：改造要在 fork 的本地克隆里进行。当前工作区 `C:\newHLSWorkspace\aladdin` 是上游的克隆，**不是** fork；需要先确定 fork 克隆到哪个目录，或把当前工作区指向 fork
+
+### D9 · UI 标识与术语：改展示层，不改契约层
+
+**原则**：只改用户可见的展示文案，**不改** API 路径、表名与代码标识符。
+
+| 位置 | 现状 | 改为 |
+|------|------|------|
+| 浏览器标题 | `frontend/index.html`：`Artoo, 一个 Agentic RAG 管理后台` | 法条库相关 |
+| 侧边栏品牌 | `components/Layout.tsx`：`Artoo` | 法条库 |
+| 落地页 | `pages/Landing.tsx`（6 处，含「以 ReAct Agent 为核心…」整段描述） | **重写**为法条召回定位 |
+| 登录页 | `pages/Login.tsx`（4 处） | 同上 |
+| 菜单项 | `Layout.tsx`：「知识库」 | 「法条库」 |
+| 页面文案 | 「知识库」术语约 20+ 文件 | 「法条库」 |
+| 后端展示文案 | `main.py` 的 FastAPI `title` / `description` / 根路径 | 法条库相关 |
+
+**不改**：API 路径（`/api/knowledge-bases/*` 等）、表名（`knowledge_bases`）、字段名（`kb_id`）、代码标识符（`KnowledgeBase` 等）、`artoo-open-api.md` 里的接口路径。
+
+**已定**：移除 `Landing.tsx` 里指向 `github.com/9ilfoyl3/artoo` 的链接；品牌走**编译期常量**（只有单一交付物，不引入运行时配置复杂度）。
+
+**实现方式**：扩展 `frontend/src/lib/labels.ts`（已有角色名映射的集中式先例）为通用产品文案模块，各处引用常量，不做 20+ 文件的散点替换。**聊天相关组件的文案不用改**——那些页面随 D7 一并删除。
+
+### D10 · 目录剥离：标记驱动，绝不按位置猜
+
+**数据**：264/346 文件含独立「目录」行，目录区合计 2,988 行（约占全部 chunk 的 11%）。这些行是「第九章　诉讼时效」这类主题标签，语义上与用户查询高度相似，会挤占召回名额并返回无用内容。
+
+**规则（必须按标记，不能按位置）**：
+
+1. 只在检测到**独立成行的「目录」标记**时才触发剥离
+2. 剥离范围 = 该标记行之后，到第一个行首 `第X条` 之前的所有行
+3. **没有目录标记就一个字节都不动**
+
+**为什么必须标记驱动**：语料里有 37 个文件（另有 2 个 `.doc` 同类）**完全没有 `第X条` 结构**（见 D11），它们整篇都是正文。若按「丢弃第一条之前的全部内容」这种朴素规则处理，这些文件会被整篇删空。
+
+**安全性证据**：346 个文件中，「有目录标记」与「无 `第X条`」的交集为 **0**。因此在现有语料上，标记驱动规则不会误伤任何文件。
+
+### D11 · 无条文结构文档（修正案 / 决定 / 规定）的处理
+
+**数据**：37 个 `.docx` 完全没有行首 `第X条`，合计 917 行（另有 2 个 `.doc` 文件名显示属同类，需 LibreOffice 转换后确认）。分三小类：《刑法修正案》（一～十二）、全国人大常委会对某部法某条的《解释》、《批准决议 / 决定 / 规定》。其中 **20 个含行首「一、」条目，16 个两者皆无**。
+
+**实例**（《中华人民共和国刑法修正案（十一）》，142 行 / 9,291 字 / 48 个「一、」条目 / 0 个「第X条」）：
+
+```
+中华人民共和国刑法修正案（十一）
+（2020年12月26日第十三届全国人民代表大会常务委员会第二十四次会议通过）
+一、将刑法第十七条修改为："已满十六周岁的人犯罪，应当负刑事责任。
+…
+二、在刑法第一百三十三条之一后增加一条，作为第一百三十三条之二："对行驶中的公共交通工具的驾驶人员…
+```
+
+它的结构单元是「一、二、三」，正文里的「刑法第十七条」是**引用**而非结构。
+
+**当前行为的问题**：无任何条文命中时，`_split_into_articles` 把整篇当作一个父块，再**按单行切子块**。而这 20 个文件的「一、」条目**平均跨 2.56 行**（引号内的条文文本会换行），于是子块被从条目中间切开，产生「"已满十四周岁不满十六周岁的人…」这类既不知属于哪份修正案、也不知属于第几项的碎片。
+
+**处置**：
+
+1. `article_number = None` —— 这类文件本就没有条文编号，硬造反而错
+2. `law_name` 从首行提取（「中华人民共和国刑法修正案（十一）」）
+3. **给 `LawsChunker` 加一个条件化 fallback**：当整篇**零个行首 `第X条`** 时，退化用「一、二、三、」作为父块边界；只要有任意一个 `第X条` 命中，就完全走现有逻辑
+
+**为什么必须条件化**：普通法律里「一、二、三」是**条文内部**的项（《国籍法》第七条含三个项）。若无条件把「一、」当父块边界，会把这些项从所属条文里拆出去，破坏本来正确的结构。
+
+**可选增强（建议做）**：这类条目的正文几乎都会点名它改的是哪一条（「第一百六十二条后增加一条」）。把条目内出现的「第X条」抽出来写进该 chunk 的 BM25 前缀：
+
+```
+[中华人民共和国刑法修正案 第一百六十二条] 一、第一百六十二条后增加一条，作为第一百六十二条之一：…
+```
+
+这样查「刑法第一百六十二条」时，修改过该条的修正案能一并被召回。这不是图谱，只是把文中已有的数字写进检索前缀，成本几乎为零。
+
+**剩余 16 个**既无条文也无「一、」条目的文件（多为批准决议），保持现状——纯叙述性短文本，整篇作父块由尺寸护栏处理。
+
+**两个从真实样本得到的分层细节**：
+
+- 「一、」条目内部还可能再嵌一层「（一）（二）」，例如《刑法修正案》（19991225）第六条下属四个「（一）～（四）」。fallback 只把「一、」当父块边界即可，嵌套层自然落为该父块内的子块。
+- 首个「一、」之前可能有一段引语（如「为了惩治破坏社会主义市场经济秩序的犯罪…作如下补充修改：」）。沿用 `_split_into_articles` 既有的「标记之前的内容作为第一个父块」行为即可，不需要额外处理。
+
+**头部日期解析的鲁棒性**：345 个 `.docx` **全部**都能解析出「YYYY年M月D日」，没有例外；括号风格 344 个是全角「（」，1 个是半角「(」（即 19991225 这一份）。解析器必须同时接受两种括号，但不必处理"完全无日期"的情况。
+
+### D12 · 条号数字形态归一：命中「第146条」的查询
+
+**问题**：正文写的是「第一百四十六条」，用户输入的是「民法典第146条」。中文数字与阿拉伯数字在 BM25 上是不同的词，词法层匹配不上；语义向量对这种形态差异也不可靠。
+
+**做法（复用既有机制）**：`pipeline.py` 给写入 Milvus 的 `content` 加了 `[文件名]` 前缀，本来就是为 BM25 服务的。把该前缀扩展为**包含法名与阿拉伯数字条号**，例如：
+
+```
+[中华人民共和国民法典 第146条] 第一百四十六条　具备下列条件的民事法律行为有效：…
+```
+
+这样「民法典 第146条」这类查询能在词法层命中。改动集中在写入路径一处，不涉及任何契约。
+
+**一个必须处理的副作用**：`content` 是**索引字段**，它会原样出现在检索结果里——`direct` 模式下结果 `content` 直接就是它；`hybrid` 模式下它出现在 `child_content`（`content` 被父块内容替换，父块来自 PG，不带前缀）。加了前缀之后，下游会在结果文本里看到 `[中华人民共和国民法典 第146条]` 这串东西。
+
+处置：在 `_build_result_items` 组装响应时**剥离前缀**，让 `content` / `child_content` 只保留纯法条文本；前缀只服务于 Milvus 内部的词法匹配。这样既不牺牲检索效果，也不污染对外返回内容。
+
+### D13 · 法名解析：以日期行为边界，不能「取首行」
+
+**数据**：345 个文件中 **34 个（9.9%）标题跨行**——首行是「全国人民代表大会常务委员会关于」，法名在第 2 行甚至第 3 行。这类全部是《解释》《决定》体裁。而 **345/345 都能解析出「YYYY年M月D日」的日期行**（此前已测）。
+
+**规则**：`law_name` = 从首行起、到**日期行之前**的所有行拼接（去空白）。日期行是普遍存在且位置稳定的天然边界，因此这条规则对所有文件都有定义，不需要额外兜底。
+
+**为什么不能取首行**：那 34 个文件会得到「全国人民代表大会常务委员会关于」这种无意义的法名，而且它看起来像个正常字符串，不会报错——又是一类静默失败。
+
+### D14 · `section_path` 清洗：只保留「第X编 / 第X章 / 第X节」
+
+**风险**：`MetadataExtractor._HEADING_PATTERNS` 把行首「（一）…」也当作 level-3 标题，唯一的护栏是「标题长度 ≤ 40 字」（`_MAX_HEADING_LEN`）。而语料里行首「（一）」共 **11,063 行，其中 8,950 行（81%）≤40 字**——也就是说**大部分会通过护栏进入 `section_path`**。
+
+`section_path` 有两个下游：`context_embedder.py` 会把它拼进 embedding 输入；我们还要把它作为 `chapter` / `section` 对外返回。后果是条文里的「项」内容会混进章节字段。
+
+**处置**：**不改 `metadata.py`**（那是 Artoo 的公共行为，改动面大且会影响 Artoo 那边）。在 `LegalMetadataExtractor` 里对 `section_path` 做一次清洗——**只保留形如「第X编 / 第X章 / 第X节」的元素**，其余丢弃。符合 D8「专属逻辑放新文件」的约束。
+
+### D15 · OCR 与 ASR 关闭（配置层，不删模块）
+
+**数据**：345 个 `.docx` 中只有 **5 个含嵌入图片**——国徽法（4 张）、国歌法（3 张）、国旗法（2 张）、香港基本法（3 张）、澳门基本法（3 张）。这些图片是国徽 / 国歌 / 国旗等**国家象征**，与法条正文无关。
+
+**结论**：法条库部署设 `OCR_ENABLED=false`；ASR 同理关闭（语料是 `.doc` / `.docx`，无音频）。
+
+**不只是"没必要"，而是"应该关"**：现有 pipeline 的设计是「自动提取嵌入图片并并发 OCR，**按页位置插入识别文本**」。对《国徽法》跑 OCR，会把国徽图片的识别结果插进法条正文中间，检索时这些噪声会与条文一起被召回——等于给法条正文掺入无法识别的字符。
+
+**处置范围**：这两项都是**配置层**改动（`config.py::ocr_enabled` 已由 `/api/system` 暴露），**不删 OCR / ASR 模块**——删除属于 D7 之外的范围蔓延，无收益且增加与 `develop` 的分叉面。
+
+**菜单**：「OCR 服务」「ASR 服务」两项从左侧菜单移除。
+
+### D16 · LLM 配置页：隐藏，不删除
+
+**确认前提（四条独立证据）**：`/api/retrieval/search` 与 LLM 模型配置完全无关——
+
+1. 检索链路只用 `manager.embedder`（稠密 + 稀疏）与 `manager.reranker`（精排）
+2. `models/manager.py` **不构造 LLM 实例**（只有 `self.embedder`、`self.reranker`）
+3. `_get_llm_for_request` 的调用方全在 `chat.py` / `skills.py` / `agent_config.py` / `graph_store.py`，检索路径一个都没有
+4. 配置存储也是分开的：检索参数在 `retrieval_configs`，LLM 在 `llm_configs`，检索不读后者
+
+**处置：隐藏菜单项，保留页面 / API / 数据表。**
+
+理由：模型管理页只有一个页面 + 一个 API 模块 + 一张表，删除的收益很小；而它与 `api/system.py`（下发 `llm_provider`）和 `models/` 下的 LLM 实现仍有残留引用，要删干净就得连带改动这些，范围会扩出去。隐藏只动菜单，零风险且可逆。
+
+**与 D7「删除非召回链路」的关系**：两者标准不同，不是矛盾——
+
+- **删除**：整条功能栈（Chat / Agent / MCP / Skills / 会话附件）。它们前端页面多、后端路由多、还有后台常驻任务，与法条库定位完全无关，删掉能实打实收窄契约面与攻击面。
+- **隐藏**：单一配置页（模型管理）。体量小、删除收益低、且存在残留耦合。
+
+**注意：这只针对 LLM，不是说检索不用模型。** 检索链路依赖**两个外部模型服务**，二者都是硬依赖：
+
+| 模型 | 用在哪 | 调用点 |
+|---|---|---|
+| Embedding | query 稠密向量 | `VectorRetriever` → `embedder.embed([query])` |
+| Embedding | query 稀疏向量 | `SparseRetriever` → `embedder.embed_sparse([query])` |
+| Rerank | 精排 | `hybrid.py::_rerank` → `self.reranker.rerank(...)` |
+| — | 全文检索 | BM25，Milvus 原生，无外部模型 |
+
+入库侧同理核实过：`pipeline.py` 构造的是 `Enricher(llm=None, enabled=False)`，**硬编码无 LLM 且关闭**。
+
+**两个页面的管辖边界（已核实）**：「模型管理」页（`Models.tsx`）只调 `llmConfigApi`，是纯 LLM 配置页；「Embedding」页（`EmbedConfig.tsx`）同时过滤 `config_type === 'embedding'` 与 `'rerank'`，**一页管两个，必须保留**。
+
+**部署硬约束**：Embedding 与 Rerank 都是外部 HTTP 服务（`RemoteEmbedder` / `RemoteReranker`），法条库部署必须能访问它们。容错上不是完全瘫痪——Embedding 不可用时只剩 BM25 顶着（响应标 `degraded`），Rerank 不可用时回退 RRF 排序——但两者都缺会显著拉低召回质量。
+
+---
+
+## 6. 数据模型与配置
+
+### 6.1 法条元数据字段（每个 child chunk）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `law_name` | str \| None | 法律全名（取自正文首行） |
+| `article_number` | int \| None | 条号；无条文结构文档为 `None` |
+| `article_label` | str \| None | 原文条号（如「第一百四十六条」） |
+| `chapter` / `section` | str \| None | 章节，直接取现有 `section_path` |
+| `issuing_authority` | str \| None | 发布机关（从正文括注解析） |
+| `publish_date` | str \| None | 通过 / 发布日期（从正文括注解析） |
+| `has_toc` | bool | 该文档是否含目录（供排查） |
+| `extraction_method` | str | rule / manual |
+| `confidence` | float | 抽取置信度 |
+
+时效性相关字段（`legal_status` / `effective_date` / `expiry_date` / `superseded_by`）本期暂缓。
+
+**已砍掉的两个字段**：`paragraph_index`（款号）与 `item_index`（项号）。款在中文立法体例里没有标号，款号只能靠"该父块内第几段"推导；项号需要另一套「（一）」解析逻辑。两者各需一份推导逻辑与测试，而检索结果经父块扩展后返回的是**整条法条**，款 / 项号当前没有下游用途支撑。等出现真实需求（例如下游要做「第X条第Y款」的精确跳转）再加。
+
+### 6.2 存储落点
+
+- **PostgreSQL**：全量字段写入 `Chunk.chunk_metadata` JSON，**无 schema 迁移**
+- **Milvus**：**不新增任何字段**（见 D1）。仅写入路径的 `content` 前缀有变化
+
+### 6.3 存储拓扑：所有法条库共用一张 collection
+
+**明确不做**：不为每个用户建 collection，也不为每个法条库建 collection。1 个全局库 + N 个个人库，只是同一张表里的 N+1 个 `kb_id` 值。
+
+- 物理表名 = `<collection base>_<dim>`，例如 `artoo_chunks_1024`
+- `_base_of(kb_id)` 对任何 kb_id（会话哨兵除外）都返回同一个 base
+- `kb_id` 是 **Partition Key**，hash 分到固定的 64 个分桶；配置注释原文即「**不是知识库数量上限**」
+- 检索与删除都带 `kb_id` 条件，按分区裁剪
+- 删除个人库用 `delete_by_kb(kb_id)`，不需要 drop collection
+
+**唯一会分表的情形是向量维度变化**（Milvus 的 `dim` 建表固定），这是 schema 硬约束，不是按库拆分。
+
+> 注：D7 删除会话附件后，会话 collection（`artoo_session_chunks`）不再写入，可一并停建。
+
+### 6.4 存量数据迁移 → 不适用
+
+全新部署、不带存量数据：不需要加列、不需要重灌、没有迁移窗口。
+
+### 6.5 配置默认值变更（相对 Artoo）
+
+设计变了，默认值就要跟着变。下表按入库 / 检索 / 产品面分类，**只有标注「改」的才需要动**。
+
+**入库侧**
+
+| 参数 | Artoo 默认 | 法条库 | 说明 |
+|---|---|---|---|
+| `chunker_type`（KB config） | 未设（自动路由到 `naive`） | **改：`laws`** | 核心改造 |
+| `parent_chunk_size` | 2500 | 不改 | 平均每条 123 字，远低于阈值 |
+| `child_chunk_size` | 450 | 不改 | 同上 |
+| `chunk_overlap` | 70 | 不改 | 仅当子块超 450 字被再切时生效，本语料几乎不触发 |
+| `upload_max_file_mb` | 10 | **不改（本期维持 10）** | 语料实测最大 `.docx` 为 701KB；虽提及可能有几 MB 的文件，但本期先保持默认，超出时再调 |
+| `OCR_ENABLED` | true | **改：false** | 见 D15 |
+| `ASR_ENABLED` | true | **改：false** | 见 D15 |
+| `GRAPH_ENABLE` | false | 不改 | 不做图谱 |
+| `kb_chunk_cap` | 1,000,000 | 不改 | 语料约 2.8 万 chunk，占 2.8% |
+
+**检索侧**
+
+| 参数 | Artoo 默认 | 法条库 | 说明 |
+|---|---|---|---|
+| 请求 `top_k` | 10 | **改：5** | 已定 |
+| `recall_k` / `rerank_candidate_k` | 128 / 50 | 不改 | 通用值 |
+| `rrf_k` | 60 | 不改 | 通用最优 |
+| `composite_rerank_weight` / `_base_weight` / `_source_weight` | 0.6 / 0.3 / 0.1 | 不改 | |
+| `rerank_threshold` / `threshold_degradation_enabled` | 0.2 / true | **实际不生效** | 检索接口传 `apply_rerank_filter=False`，软阈值本就跳过；无需改值 |
+| `rerank_top_k` | 10 | 不改 | |
+| `mmr_lambda` / `mmr_threshold` | 0.7 / 0.7 | 不改 | |
+| `hnsw_ef` / `hnsw_ef_construction` / `hnsw_m` | 128 / 200 / 16 | 不改 | |
+
+**产品面**
+
+| 参数 | Artoo 默认 | 法条库 | 说明 |
+|---|---|---|---|
+| `registration_mode` | `invite_only` | 不改 | 正好符合「无自助注册、无邀请」——账号由管理员创建 |
+| `content_view_boundary_open` | false | 不改 | 与「超管不参与内容」的设计一致 |
+| `llm_*` | 有默认值 | **无用途** | 删掉 Chat / Agent / 图谱 / 入库 LLM 后，**请求路径上没有任何 LLM 调用** |
+| `session_upload_*` | 有 | 随 D7 移除 | |
+
+**一个由此推出的菜单结论**：既然请求路径上没有任何 LLM 调用，**「模型管理」（LLM）页在本部署中是死配置，采取「隐藏」而非删除**（见 D16）。「Embedding」页同时管理 Embedding 与 Rerank（`embed_config.py` 的 `config_type: embedding | rerank`），必须保留。于是平台能力菜单只剩 **Embedding + API Key**。
+
+---
+
+## 7. 接口契约
+
+### 7.1 不新增端点，改造现有端点
+
+法条检索就是 **`POST /api/retrieval/search` 本身**，改造点是「默认带上全局法条库」。
+
+| 层 | 变化 |
+|----|------|
+| 路径 | 不变 |
+| 请求模型 | 不变（`kb_ids` 传个人库；`knowledge_base_id` / `session_id` 能力随 D7 调整） |
+| 认证 | 不变（沿用现有 Key 通道） |
+| 错误模型 | 不变 |
+| 响应信封 | 不变 |
+| 单条结果 | 不变（法条字段放进已有的 `metadata`） |
+
+### 7.2 行为变更（需明确接受）
+
+**默认带上全局库。** 调用方不传任何库时，检索仍会返回全局法条库的结果。现状是「三者至少其一，否则 400」，改造后该 400 不再触发。
+
+**`top_k` 默认值改为 5。** 字段名保持 `top_k` 不变（因为就是同一个接口，改名会让"同一接口"的定位变模糊）；本部署的默认值从 10 调为 5。下游若复用代码且依赖默认值，需注意这一点。
+
+### 7.2.1 多源时的既有行为（沿用，不改）
+
+检索目标为两个及以上源时，`_run_multi_source_retrieval` **不读 `mode` 参数**，一律执行 hybrid；响应里 `mode` 返回 `"hybrid"`、`trace` 为 `null`。
+
+**这是 Artoo 的既有行为，不是本次改动引入的**——`RetrievalTestRequest.mode` 的字段说明原文即「多源（多库或含会话附件）统一按 hybrid 混合召回口径执行，direct 仅在单库单源时生效」，Open API 6.1 也写明了。本次改动只是让它在法条库里**更容易被触发**（只要调用方传了个人库就必然是多源）。
+
+**多源本来就是既有的一等能力**，不是边缘情况：多库联合检索（`kb_ids`）是 Open API 6.1 的正式用法，多源响应结构（`trace: null` / `degraded` / `failed_source_count`）也是为它专门定义的。因此「自动带全局库」是搭在一条已被充分使用的代码路径上——不新增分支、不新增算法。
+
+对法条库无实际影响：`direct` 丢掉 BM25 与父块扩展，对法条检索是全面劣化，本就不应使用。调用方若要确认实际执行模式，读响应里的 `mode` 字段即可。
+
+**源的失败语义（沿用）**：某个源异常或超时 → 该源返回空、其 `kb_id` 计入 `failed_kb_ids`；响应 `degraded=true`、`failed_source_count=N`，其余源照常返回。调用方传了不存在的个人库时即为此情形——这是预期内的可观测行为，不是静默失败。
+
+### 7.3 请求 / 响应示例
+
+```json
+POST /api/retrieval/search
+Authorization: Bearer sk-xxx
+
+{
+  "query": "民法典第146条",
+  "kb_ids": ["kb_personal_xxx"],
+  "top_k": 5
+}
+```
+
+```json
+{
+  "query": "民法典第146条",
+  "mode": "hybrid",
+  "total": 1,
+  "elapsed_ms": 96,
+  "results": [
+    {
+      "chunk_id": "ck-1",
+      "doc_id": "doc-71bc...",
+      "filename": "中华人民共和国民法典_20200528.docx",
+      "source_type": "knowledge_base",
+      "content": "第一百四十六条　具备下列条件的民事法律行为有效：…",
+      "child_content": "第一百四十六条　具备下列条件的民事法律行为有效：…",
+      "score": 0.95,
+      "rrf_score": 0.031,
+      "rerank_score": 0.95,
+      "routes": ["dense", "bm25"],
+      "metadata": {
+        "law_name": "中华人民共和国民法典",
+        "article_number": 146,
+        "article_label": "第一百四十六条",
+        "chapter": "第三编　合同 / 第一分编　通则"
+      }
+    }
+  ],
+  "trace": null,
+  "degraded": false,
+  "failed_source_count": 0
+}
+```
+
+### 7.4 内容维护
+
+全部复用现有接口，不新增：`POST /api/knowledge-bases/{kb_id}/documents/upload`、`GET /api/knowledge-bases/{kb_id}/documents`、`DELETE /api/documents/{doc_id}`、`POST /api/documents/{doc_id}/retry`、`DELETE /api/knowledge-bases/{kb_id}`。
+
+**注意**：删库目前是 owner-only 闸门。若下游要按 `kb_id` 删除自己创建的个人库，需确认该闸门对相应身份放行。
+
+**重复上传的既有行为（已验证）**：上传接口按 `file_hash`（SHA256，作用域为同一 `kb_id`）去重。同内容重复上传**不报错**——返回 HTTP 201 且 `status="duplicate"`，附带「该文件已存在…内容相同」的说明，不会新建文档。内容变化则哈希不同 → 新建文档，而旧文档保留。
+
+这与「人工删除 + 上传新版」的更新流程一致：**换版必须先删旧文档**，否则新旧两版会同时留在库里。
+
+---
+
+## 8. 复用清单与新增清单
+
+### 8.1 直接复用，零改动
+
+| # | 需求 | 已有可复用物 |
+|---|------|-------------|
+| 1 | 全局库 + 个人库合并排序 | `MultiKBRetriever`（各源同权、统一 rerank、每源独立 `expr`） |
+| 2 | 结果承载法条字段 | `RetrievalResultItem.metadata: dict` 已在下发 |
+| 3 | 章节路径 | `ChunkMetadata.section_path`（已含第X编 / 第X章 / 第X节） |
+| 4 | 「第X条」父块切分 | `LawsChunker` |
+| 5 | 超长兜底切分 | `chunker.py::enforce_size_limits` |
+| 6 | 分块参数调优 | `parent_chunk_size` 等已是 KB 级可配参数 |
+| 7 | 法条元数据落库 | `Chunk.chunk_metadata` JSON + `asdict(meta)` |
+| 8 | 结果水合 | `_build_result_items` 的批量查询模式（扩展它，不新建） |
+| 9 | 内容维护 | `api/document.py` + `api/knowledge_base.py` 全套 |
+| 10 | 前端能力开关 | `/api/system/frontend-config` + `useGraphGating.ts` 的现成门控模式 |
+| 11 | 引导框架 | `auth/bootstrap.py::run_bootstrap`（幂等） |
+| 12 | 评测工具 | `app/scripts/evaluate_retrieval.py`（不用新建） |
+| 13 | BM25 内容增强 | `content` 的 `[前缀]` 机制（扩展它做条号归一） |
+
+### 8.2 需改现有代码
+
+- `pipeline/pipeline.py`：接入新的法条抽取器；扩展写入 Milvus 的 `content` 前缀
+- `pipeline/chunkers/laws.py`：新增「整篇无 `第X条`」时的 fallback 切分分支（按「一、」切父块），见 D11
+- `api/retrieval.py`：检索目标默认并入全局库；水合扩展法条字段；移除会话附件分支（随 D7）
+- `auth/bootstrap.py`：增加全局法条库引导步骤
+- `api/document.py` / `pipeline/pipeline.py`：随 D7 把 `limits.py` 的引用改到新位置
+- 前端：菜单、路由、术语与品牌文案
+
+### 8.3 必须新写（逐项确认过无现成物）
+
+| # | 新写内容 | 为什么没有现成物 |
+|---|----------|------------------|
+| 1 | 中文数字 → 阿拉伯数字转换 | 全仓库 4 处中文数字正则**只匹配、不转换** |
+| 2 | 法条正文头部解析（法名 / 机关 / 日期） | `MetadataExtractor` 只提取章节标题与元素类型 |
+| 3 | 目录剥离（标记驱动） | 无现成实现 |
+| 4 | 法条元数据抽取器主体（`LegalMetadataExtractor`）+ 条号提取 | `ChunkMetadata` 无法条字段；`LawsChunker` 只切割不产编号 |
+| 5 | 抽取置信度评估与分流 | 无同类机制 |
+| 6 | 全局法条库引导创建步骤 | `run_bootstrap` 提供的是框架，这一步本身是新的 |
+
+**已确认不需要新写的**：法条引用解析（因取消精确过滤车道）、Milvus 转义 helper（因不再拼法名进 expr）、个人库 get-or-create（由下游经现有 KB API 管理）。
+
+---
+
+## 9. 分阶段实施
+
+### Phase 0 · 契约冻结与基线
+
+| 任务 | 文件 | 产出 |
+|------|------|------|
+| 冻结接口契约 | `artoo-open-api.md` | 记录「默认带全局库」与 `top_k` 默认值变更 |
+| 冻结法条字段字典 | 本文 §6.1 | 字段名 / 类型 / 可空性 |
+| ~~建评测集~~ | — | 已确认延后（见 §1 暂缓）；验证改以单测 / 集成 / 端到端 + 人工抽查为准 |
+| 补检索回归基线 | `backend/tests/` | 改动前召回结果快照 |
+| 创建 Agent Note | `.agents/notes/proposed/feature/` | 英文 + `.zh.md` |
+
+### Phase 1 · 入库结构化
+
+| 任务 | 文件 | 说明 |
+|------|------|------|
+| 中文数字转换 | 新建共享工具 | 供抽取器复用 |
+| `LawsChunker` fallback | `pipeline/chunkers/laws.py` | 无条文结构时用「一、」切父块，见 D11 |
+| 目录剥离 | `pipeline/legal_metadata.py` | 标记驱动，见 D10 |
+| `LegalMetadataExtractor` | `pipeline/legal_metadata.py`（新增） | 法名 / 条号 / 款项；`chapter` 取 `section_path` |
+| 置信度标记 | 同上 | 失败不阻塞入库，标记后可见 |
+| pipeline 集成 | `pipeline/pipeline.py` | 在 `MetadataExtractor` 之后接入 |
+| `content` 前缀扩展 | `pipeline/pipeline.py` ≈L683 | 加 `[法名 第N条]`，见 D12 |
+
+交付判据：样本语料端到端入库；**抽取结果全量核对**——输出「每份文件的法名 + 条号数」清单，逐份人工核对，目标是不出错（不设百分比目标，因为在法条场景下一个错条号的代价很高，百分比会暗示"允许错几个"）；37+ 个无条文文档不被误删；目录区不进检索。
+
+### Phase 2 · 检索接口改造
+
+| 任务 | 文件 | 说明 |
+|------|------|------|
+| 全局库默认并入 | `api/retrieval.py` | 检索目标自动带全局库 |
+| 结果水合扩展 | `api/retrieval.py::_build_result_items` | 批量补 `law_name` / `article_number` |
+| `top_k` 默认值 | `api/retrieval.py` | 本部署改为 5 |
+
+交付判据：不传 kb_ids 也能返回全局库结果；「民法典第146条」可命中；结果带法名与条号。
+
+### Phase 3 · 默认租户、全局库与维护入口
+
+| 任务 | 文件 | 说明 |
+|------|------|------|
+| 默认租户引导 | `auth/bootstrap.py` | 幂等创建唯一默认租户，并创建该租户的管理员（凭据走 env，与 Super_Admin 同模式） |
+| 全局库引导 | `auth/bootstrap.py` | 幂等创建全局法条库：owner = 默认租户管理员，`chunker_type=laws`，`organization` + `read` |
+| 左侧菜单 | `Layout.tsx` | 「法条库」菜单**只给默认租户管理员**；**不要**加入 `SUPER_ADMIN_MENUS` |
+| 直达页面 | `App.tsx` | 独立路由（如 `/legal`），内部解析全局库 id 后渲染维护视图 |
+| 文档列表显示法名 | `frontend/src/pages/Documents.tsx` | 展示 `law_name`，人工替换法律时同名重复可见 |
+
+**两处易踩的点**：
+
+1. `Documents.tsx` 目前从 `useParams().id` 取库 id，需要支持显式传入 `kbId`，否则在独立路由下渲染拿不到 id。
+2. `SUPER_ADMIN_ALLOWED_PATHS` 是**精确匹配**的 `Set`，且**只约束 Super_Admin**。租户管理员不受它限制，因此本项**不需要改白名单**——早先稿子要求把它加进去，是基于"超管维护"的错误前提，已更正。
+
+### Phase 4 · UI 标识改造
+
+见 D9。先建集中文案模块，再逐处引用；`Landing.tsx` 的产品描述整段重写。
+
+**左侧菜单最终清单**（已确认）：
+
+| 菜单项 | 处置 | 可见性 |
+|---|---|---|
+| 法条库 | **新增**（替代「知识库」） | 租户管理员 |
+| 检索测试 | 保留 | 超管 |
+| Embedding（含 Rerank） | 保留 | 超管 |
+| API Key | 保留 | 超管 |
+| 租户管理 | 保留 | 超管 |
+| 用户管理 | 保留 | 租户管理员 |
+| 审计日志 | 保留 | 租户管理员 / 超管 |
+| 智能体 / 技能 / MCP 服务 | 删除 | 随 D7 |
+| OCR 服务 / ASR 服务 | 删除 | 配置层关闭（D15） |
+| 模型管理（LLM） | **隐藏**（保留页面 / API / 表） | 详见 D16 |
+| 邀请链接 | 删除 | 单租户，账号由管理员创建 |
+
+可访问路径白名单同步收缩：超管的 `SUPER_ADMIN_ALLOWED_PATHS` 保留 `/tenants`、`/embed-config`、`/api-keys`、`/audit-logs`（移掉 `/models`、`/ocr-services`、`/asr-services`、`/mcp-servers`、`/agent-config`）。
+
+> 注意 `/models` 只是从菜单与白名单移出（D16 的「隐藏」），**页面与后端 API 不删**；而 `/ocr-services`、`/asr-services`、`/mcp-servers`、`/agent-config` 是随 D7 / D15 一起删除页面。
+
+### Phase 5 · 删除非召回链路
+
+见 D7。先挪 `session_upload/limits.py`、再删会话附件引用，最后删模块与前端页面。
+
+---
+
+## 10. 验证策略
+
+| 层 | 内容 |
+|----|------|
+| 单测 | 中文数字转换（覆盖到万位）；目录剥离（含「有目录 / 无目录 / 无条文」三类）；头部解析；条号抽取 |
+| 集成 | 样本语料走完整 pipeline，校验 PG 元数据与 Milvus `content` 前缀 |
+| 端到端 | 语义查询命中正确法条；「民法典第146条」词法命中；`top_k` 边界（请求 10 条但只有 3 条时返回 3 条） |
+| 评测 | 用 Phase 0 的评测集跑 `evaluate_retrieval.py`，产出 top-5 命中率 |
+| 回归 | 改动前后对既有查询的召回结果对比 |
+| 前端 | 菜单可直达全局库维护页；品牌文案无残留 |
+
+---
+
+## 11. 风险与回滚
+
+| 风险 | 影响 | 对策 |
+|------|------|------|
+| 目录剥离误伤正文 | 内容丢失且静默 | 标记驱动；无条文文档与「有目录标记」交集为零；单测覆盖三类样本 |
+| 中文数字转换错误 | 条号错位 | 单测覆盖；保留 `article_label` 原文可核对 |
+| 全局库不在调用方租户内 | 检索不到 | 引导时建在同一租户；端到端用例验证 |
+| 默认带全局库改变接口行为 | 下游依赖旧 400 语义 | Phase 0 记录契约变更并与下游确认 |
+| `top_k` 默认值变更 | 下游复用代码时结果条数变化 | 文档标注；建议下游显式传值 |
+| 误删 `session_upload/limits.py` | 普通上传容量校验断裂 | 先挪位置再删目录（D7） |
+| 人工更新漏删旧版 | 同一条文的旧版与新版同时可召回，且无时效字段可区分 | 文档列表展示 `law_name`，同名重复可见；替换后由维护者自查 |
+| 维护者身份选错 | 全局库打不开或改不了 | 维护者必须是**默认租户的管理员**（作为全局库 owner）；Super_Admin 在设计上无权访问任何 KB |
+| 本地未装 LibreOffice | `.doc` 上传报错 | 容器已内置；文档注明本地依赖 |
+| fork 与上游长期分叉 | 合并成本累积 | 专属逻辑放新文件；配好 `upstream` remote 并定期同步 |
+
+回滚以能力开关与 fork 内提交回退为核心，数据可重建（全新部署、无存量依赖）。
+
+---
+
+## 12. 里程碑
+
+| 阶段 | 产出 | 依赖 |
+|------|------|------|
+| M0 | 契约冻结 + 评测集 + 基线 | — |
+| M1 | 入库结构化可用（含目录剥离与条号归一） | M0 |
+| M2 | 检索接口改造完成 | M1 |
+| M3 | 全局库引导与入口 | M2 |
+| M4 | UI 标识改造 | M2 |
+| M5 | 非召回链路删除 | M2 |
+
+M0–M2 硬串行，M3–M5 可并行。
+
+---
+
+## 13. 决策清单
+
+| # | 决策 |
+|---|------|
+| 1 | **Fork 仓库改造，不切新分支**；fork 即长期产品线的上游 |
+| 2 | Artoo 与法条库两个应用完全独立部署、互不干涉 |
+| 3 | 全新部署，不带存量数据，无迁移 |
+| 4 | 检索以语义为主；不做法条精确过滤车道 |
+| 5 | **检索接口就是现有 `/api/retrieval/search`**，改造为默认带上全局法条库 |
+| 6 | 全局库全平台一个，自动带上；个人库由下游传 `kb_ids` |
+| 7 | 不做逐用户鉴权，不做跨租户例外；Key 只承担接口调用权限 |
+| 8 | `top_k` 字段名不变，本部署默认值 5 |
+| 9 | 不做批量端点 |
+| 10 | 目录剥离采用标记驱动规则 |
+| 11 | 条号做中文 / 阿拉伯数字归一（BM25 前缀增强） |
+| 12 | 无条文结构文档（37 个 `.docx` + 2 个 `.doc`）：`article_number = None`，内容照常入库 |
+| 13 | 砍掉引用图谱与入库 LLM 抽取 |
+| 14 | 非召回链路真正删除（不是隐藏） |
+| 15 | UI 标识改为「法条库」；只改展示层；移除上游 GitHub 链接；品牌用编译期常量 |
+| 16 | 时效性暂缓，设计保留 |
+| 17 | 评测工具复用现有 harness（评测集本身延后，见 #19） |
+| 18 | 法律修订由人工删除 + 上传更新，不做自动替换 |
+| 19 | 评测集本期不做（已确认延后） |
+| 20 | 法条库为**单租户**部署；默认租户管理员维护全局库；Super_Admin 只做平台装配、不参与内容 |
+| 21 | 调用方使用绑定默认租户的 `user_level` Key，不使用 `external_agent` 通道 |
+| 22 | 抽取结果**全量核对**（输出法名 + 条号数清单逐份核对），不设百分比验收目标 |
+| 23 | 砍掉 `paragraph_index` / `item_index`（款号 / 项号）两字段 |
+| 24 | 关闭 OCR 与 ASR（配置层，不删模块）；原因不只是"用不上"，而是 OCR 会把图片识别结果插进法条正文造成污染 |
+| 25 | LLM 模型配置页**隐藏**（保留页面 / API / 表），不从菜单进入；检索与之完全无关（D16） |
+| 26 | `upload_max_file_mb` 本期维持默认 10MB，不调整 |
+
+---
+
+## 14. 仓库规范要求
+
+按 `AGENTS.md`，本次改造属于非平凡变更，**必须在同一 PR 内提交 Agent Note**：
+
+- 路径：`.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`
+- 建议拆分：法条入库结构化（`feature`）、检索接口改造与语义定位（`architecture`）、非召回链路删除（`simplification`）
+- 每份英文 Note 配一份同名 `.zh.md`；日期取首次提出日
+
+验证命令：后端 `backend/` 下 pytest、前端 `frontend/` 下 build / 测试、协议变更同步 `artoo-open-api.md`、部署变更跑 compose 校验。**只报告实际执行过的命令与结果。**
