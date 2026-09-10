@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from app.config import get_settings
 from app.models.manager import ModelManager
@@ -36,6 +36,11 @@ from app.pipeline.loader import EmbeddedImage, LoadResult, get_loader
 from app.pipeline.logging import PipelineLogger
 from app.pipeline.context_embedder import ContextualEmbedder
 from app.pipeline.metadata import ChunkMetadata, MetadataExtractor
+from app.pipeline.legal_metadata import (
+    LegalMetadataExtractor,
+    analyze_legal_document,
+    build_content_prefix,
+)
 from app.pipeline.progress import PipelineStage, ProgressTracker
 from app.schema.db import Chunk, Document, KnowledgeBase
 from app.storage.milvus import MilvusClient
@@ -107,6 +112,8 @@ class ProcessedDocument:
     embed_result: "EmbedResult"
     doc_metadata: dict
     child_to_parent: dict[int, int]
+    # 法条元数据：与 metadata_list 索引一一对应；非法条语料下为空字典。
+    legal_metadata: list[dict] = field(default_factory=list)
 
 
 class DocumentPipeline:
@@ -338,6 +345,17 @@ class DocumentPipeline:
                     "若为扫描件请确认 OCR 服务可用且支持该文件类型"
                 )
 
+            # ─── 3.3 法条文档级预处理（目录剥离 + 法名解析） ───
+            # 必须在切分之前：目录行一旦被切成 chunk 并写入索引，就再也剥不掉了。
+            # 对非法条语料这是 no-op——没有独立成行的「目录」标记就不动文本。
+            # 设计依据见 docs/legal-recall-implementation-plan.md 的 D10 / D13。
+            legal_analysis = analyze_legal_document(final_content)
+            if legal_analysis.header.toc_stripped:
+                logger.info(
+                    "[%s=%s] 法条文档：已剥离目录区，法名=%r",
+                    source_kind, source_id, legal_analysis.header.law_name,
+                )
+
             # ─── 3. Chunk ───
             if load_result.pre_chunked:
                 from app.pipeline.chunker import ChunkResult as _ChunkResult
@@ -354,10 +372,10 @@ class DocumentPipeline:
                     source_id=source_id,
                     tenant_id=tenant_id,
                     file_type=ext,
-                    content=final_content,
+                    content=legal_analysis.text,
                 )
                 chunk_result = await asyncio.to_thread(
-                    chunker.chunk, final_content, load_result.metadata
+                    chunker.chunk, legal_analysis.text, load_result.metadata
                 )
 
             # ─── 3.4 大小护栏（对齐 WeKnora absoluteMaxSize） ───
@@ -410,6 +428,17 @@ class DocumentPipeline:
                 page_texts=load_result.page_texts if load_result.page_texts else None,
             )
 
+            # 法条元数据叠加在通用元数据之上，索引一一对应。
+            # 位置必须在 enforce_size_limits 之后——超长父块被护栏再切时，
+            # 条号要在切分后的父块上重新判定，否则拆出的父块会丢失归属。
+            legal_metadata = LegalMetadataExtractor().extract(
+                child_chunks=enriched_children,
+                parent_chunks=chunk_result.parent_chunks,
+                parent_child_map=chunk_result.parent_child_map,
+                section_paths=[m.section_path for m in metadata_list],
+                analysis=legal_analysis,
+            )
+
             child_to_parent = self._build_child_to_parent_map(chunk_result.parent_child_map)
             ctx_embedder = ContextualEmbedder()
             context_headers = chunk_result.context_headers or []
@@ -446,6 +475,7 @@ class DocumentPipeline:
                 embed_result=embed_result,
                 doc_metadata=load_result.metadata,
                 child_to_parent=child_to_parent,
+                legal_metadata=legal_metadata,
             )
         finally:
             # 清理图片临时目录：本方法在两条路径下都需兜底清理图片临时目录。
@@ -621,6 +651,7 @@ class DocumentPipeline:
                 chunk_result = processed.chunk_result
                 enriched_children = processed.enriched_children
                 metadata_list = processed.metadata_list
+                legal_metadata = processed.legal_metadata
                 embed_result = processed.embed_result
                 child_to_parent = processed.child_to_parent
 
@@ -667,6 +698,13 @@ class DocumentPipeline:
                     # 构造 chunk_metadata JSON
                     meta = metadata_list[child_idx]
                     chunk_metadata_dict = asdict(meta)
+                    legal = (
+                        legal_metadata[child_idx]
+                        if child_idx < len(legal_metadata)
+                        else {}
+                    )
+                    if legal:
+                        chunk_metadata_dict.update(legal)
 
                     child_chunk = Chunk(
                         id=child_id,
@@ -683,10 +721,17 @@ class DocumentPipeline:
                     milvus_data.append({
                         "chunk_id": child_id,
                         "doc_id": doc_id,
-                        # BM25 content 增强：加文件名前缀，帮助 BM25 和 Rerank 区分同结构文档
-                        # Dense embedding 不受影响（使用原始 content 生成向量）
+                        # BM25 content 增强：前缀帮助 BM25 与 Rerank 区分同结构文档。
+                        # 法条语料下前缀升级为「[法名 第N条]」（N 为阿拉伯数字），
+                        # 使「民法典第146条」能命中写作「第一百四十六条」的正文；
+                        # 取不到法条字段时回退为旧的「[文件名]」。详见 D12。
+                        # Dense embedding 不受影响（使用原始 content 生成向量）。
                         "content": self._truncate_utf8(
-                            f"[{doc_title}] {child_text}" if doc_title else child_text,
+                            (
+                                f"{prefix} {child_text}"
+                                if (prefix := build_content_prefix(legal, doc_title))
+                                else child_text
+                            ),
                             60000,
                         ),
                         "dense_vector": embed_result.dense_vectors[child_idx],

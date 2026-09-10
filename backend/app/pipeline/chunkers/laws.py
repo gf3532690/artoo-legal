@@ -10,6 +10,7 @@ import re
 
 from app.pipeline.chunker import ChunkResult
 from app.pipeline.chunker_router import BaseChunker, ChunkerFactory
+from app.pipeline.legal_terms import ARTICLE_LINE_PATTERN, ITEM_LINE_PATTERN
 
 
 # 法律文书结构分割正则：第X条、本院认为、判决如下、经审理查明等
@@ -49,8 +50,20 @@ class LawsChunker(BaseChunker):
 
         stripped = text.strip()
 
-        # 按法律结构标记切分父块
-        parent_chunks = self._split_into_articles(stripped)
+        # 按法律结构标记切分父块。
+        #
+        # 条件化退化：语料里有 37 份文档（《刑法修正案》《全国人大常委会关于…的
+        # 决定 / 规定》类）**完全没有**「第X条」结构，它们的一级结构是「一、二、三」。
+        # 对这类文档若仍按条文切，整篇会变成单一父块，再按单行切子块就会把跨行的
+        # 条目从中间切断（条目平均跨 2.56 行）。
+        #
+        # 为什么必须条件化：普通法律里「一、」是**条文内部**的项（《国籍法》第七条
+        # 就含三个项），无条件把它当父块边界会把这些项从所属条文里拆出去。
+        # 判定用共享的行首「第X条」正则（``legal_terms``），保证与元数据抽取同源。
+        if ARTICLE_LINE_PATTERN.search(stripped):
+            parent_chunks = self._split_by_pattern(stripped, _ARTICLE_PATTERN)
+        else:
+            parent_chunks = self._split_by_pattern(stripped, ITEM_LINE_PATTERN)
 
         # 对每个父块切分子块
         child_chunks: list[str] = []
@@ -70,13 +83,18 @@ class LawsChunker(BaseChunker):
             parent_child_map=parent_child_map,
         )
 
-    def _split_into_articles(self, text: str) -> list[str]:
-        """按条款编号和判决结构关键词切分为父块
+    def _split_by_pattern(self, text: str, pattern: re.Pattern[str]) -> list[str]:
+        """按给定结构标记切分为父块
 
         每个匹配到的结构标记开始一个新的父块。
         标记之前的内容（如文书标题、当事人信息）作为第一个父块。
+
+        Args:
+            text: 待切分文本。
+            pattern: 结构标记正则；``_ARTICLE_PATTERN`` 用于有条文结构的文书，
+                ``ITEM_LINE_PATTERN`` 用于无条文结构的修正案 / 决定类文档。
         """
-        matches = list(_ARTICLE_PATTERN.finditer(text))
+        matches = list(pattern.finditer(text))
 
         if not matches:
             # 没有法律结构标记，整段作为一个父块
