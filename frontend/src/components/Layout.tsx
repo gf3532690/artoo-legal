@@ -2,19 +2,13 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import {
   Database,
-  MessageSquare,
   Search,
   Key,
   Settings,
   Cpu,
   ScanText,
   AudioLines,
-  Plug,
   Layers,
-  Bot,
-  Sparkles,
-  SquarePen,
-  Trash2,
   PanelLeft,
   LogOut,
   KeyRound,
@@ -26,8 +20,6 @@ import {
   UserCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useSession } from '@/lib/session-context'
-import { useConfirm } from '@/lib/confirm-context'
 import { useAuth } from '@/lib/auth-context'
 import ProfileDialog from '@/components/ProfileDialog'
 import SettingsDialog from '@/components/SettingsDialog'
@@ -43,17 +35,14 @@ import { useArtifactStore } from '@/stores/artifactStore'
 // 审计日志归 manage（admin 可见），但 Super_Admin 经下方 SUPER_ADMIN_MENUS 单独放行。
 const navItems = [
   // 法条库部署：入口直达全局法条库的内容维护页（仅租户管理员可见）。
-  // 取代上游的「法条库」列表入口——本产品线的库范围由下游决定，
+  // 取代上游的「知识库」列表入口——本产品线的库范围由下游决定，
   // 管理员只需要维护全局法条库。
   { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
-  { to: '/agent-config', label: '智能体', icon: Bot, group: 'content' },
-  { to: '/skills', label: '技能', icon: Sparkles, group: 'content' },
   { to: '/retrieval', label: '检索测试', icon: Search, group: 'capability' },
   { to: '/models', label: '模型管理', icon: Cpu, group: 'capability' },
   { to: '/embed-config', label: 'Embedding', icon: Layers, group: 'capability' },
   { to: '/ocr-services', label: 'OCR 服务', icon: ScanText, group: 'capability' },
   { to: '/asr-services', label: 'ASR 服务', icon: AudioLines, group: 'capability' },
-  { to: '/mcp-servers', label: 'MCP 服务', icon: Plug, group: 'capability' },
   { to: '/api-keys', label: 'API Key', icon: Key, group: 'capability' },
   { to: '/tenants', label: '租户管理', icon: Building2, group: 'platform' },
   { to: '/users', label: '用户管理', icon: UsersIcon, group: 'manage' },
@@ -65,7 +54,6 @@ const navItems = [
 function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
-  const isChat = location.pathname === '/chat'
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
 
@@ -77,7 +65,6 @@ function Layout() {
   }, [location.pathname, closeArtifact])
   const [profileOpen, setProfileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const confirm = useConfirm()
   const { isSuperAdmin, isAdmin, logout, profile } = useAuth()
 
   // 菜单可见性（固定角色模型，取代权限点）：
@@ -97,8 +84,6 @@ function Layout() {
     '/embed-config',
     '/ocr-services',
     '/asr-services',
-    '/mcp-servers',
-    '/agent-config',
     '/retrieval',
     '/api-keys',
   ])
@@ -106,17 +91,8 @@ function Layout() {
     if (isSuperAdmin) return SUPER_ADMIN_MENUS.has(item.to)
     if (item.group === 'platform') return false // 平台菜单仅 Super_Admin
     if (item.group === 'capability') return false // 能力配置仅 Super_Admin（已上收平台）
-    if (item.group === 'content') return true // 内容菜单 admin/member 均可见
     return isAdmin // manage 菜单仅 admin
   })
-
-  const {
-    sessions,
-    currentSessionId,
-    setCurrentSessionId,
-    handleNewSession,
-    handleDeleteSession,
-  } = useSession()
 
   // 内容与菜单一致性守卫：超管为纯平台管理身份，仅允许访问其菜单内的页面
   // （租户管理 / 审计日志）与账号自助页（改密）。系统设置/个人资料已改为账号
@@ -134,35 +110,11 @@ function Layout() {
     '/embed-config',
     '/ocr-services',
     '/asr-services',
-    '/mcp-servers',
-    '/agent-config',
     '/retrieval',
     '/api-keys',
   ])
   if (isSuperAdmin && !SUPER_ADMIN_ALLOWED_PATHS.has(location.pathname)) {
     return <Navigate to="/tenants" replace />
-  }
-
-  // 点击新对话：跳转到 chat 页面并重置会话
-  function onNewSession() {
-    handleNewSession()
-    navigate('/chat')
-  }
-
-  // 点击历史会话：跳转到 chat 页面并切换会话
-  function onSwitchSession(sessionId: string) {
-    setCurrentSessionId(sessionId)
-    navigate('/chat')
-  }
-
-  // 删除会话（统一确认交互）
-  async function onDeleteSession(session: { id: string; title: string }, e: React.MouseEvent) {
-    e.stopPropagation()
-    const ok = await confirm({
-      title: '删除对话',
-      description: <>确定要删除对话「{session.title}」吗？此操作不可撤销。</>,
-    })
-    if (ok) handleDeleteSession(session.id, e)
   }
 
   return (
@@ -193,22 +145,8 @@ function Layout() {
             </button>
           </div>
 
-          {/* 常驻按钮区：新对话 + 导航。超管为纯平台管理身份，不使用对话/法条库功能，隐藏新对话。 */}
+          {/* 常驻按钮区：导航。对话链路已随非召回链路移除（见方案 D7）。 */}
           <div className="px-3 pt-3 pb-2 space-y-1">
-            {!isSuperAdmin && (
-              <button
-                onClick={onNewSession}
-                className={cn(
-                  'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors',
-                  isChat && (currentSessionId === null)
-                    ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                )}
-              >
-                <SquarePen className="h-4 w-4" />
-                <span>新对话</span>
-              </button>
-            )}
             {visibleNavItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -228,50 +166,8 @@ function Layout() {
             ))}
           </div>
 
-          {/* 历史对话列表（超管不显示，纯平台管理身份不参与对话） */}
-          {!isSuperAdmin ? (
-          <div className="flex-1 overflow-auto px-2 pt-2 pb-2 space-y-0.5">
-            <p className="px-3 pt-2 pb-1 text-xs text-sidebar-foreground/85 font-medium">历史对话</p>
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                onClick={() => onSwitchSession(session.id)}
-                className={cn(
-                  'group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-[13px]',
-                  currentSessionId === session.id && isChat
-                    ? 'bg-sidebar-primary text-sidebar-primary-foreground font-medium'
-                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
-                )}
-              >
-                <span className="flex-1 truncate leading-snug">{session.title}</span>
-                <button
-                  onClick={(e) => onDeleteSession(session, e)}
-                  className={cn(
-                    'opacity-0 group-hover:opacity-100 h-5 w-5 rounded flex items-center justify-center transition-opacity cursor-pointer',
-                    currentSessionId === session.id && isChat
-                      ? 'hover:bg-black/10'
-                      : 'hover:bg-destructive/10'
-                  )}
-                >
-                  <Trash2 className={cn(
-                    'h-3 w-3',
-                    currentSessionId === session.id && isChat
-                      ? 'text-sidebar-primary-foreground/70 hover:text-sidebar-primary-foreground'
-                      : 'text-muted-foreground hover:text-destructive'
-                  )} />
-                </button>
-              </div>
-            ))}
-            {sessions.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <MessageSquare className="h-6 w-6 opacity-20 mb-2" />
-                <p className="text-xs">暂无对话记录</p>
-              </div>
-            )}
-          </div>
-          ) : (
-            <div className="flex-1" />
-          )}
+          {/* 历史对话列表已随对话链路移除（见方案 D7） */}
+          <div className="flex-1" />
 
           {/* 底部：当前登录者（紧凑一栏：头像+用户名+身份）。点击展开账号操作。 */}
           <div className="border-t border-sidebar-border px-3 py-2 relative">
@@ -357,22 +253,6 @@ function Layout() {
 
           {/* 导航图标 */}
           <div className="flex flex-col items-center pt-3 px-1">
-            {!isSuperAdmin && (
-            <button
-              onClick={onNewSession}
-              className="h-10 w-full flex items-center justify-center cursor-pointer"
-              title="新对话"
-            >
-              <div className={cn(
-                'h-8 w-8 flex items-center justify-center rounded-md transition-colors',
-                isChat && (currentSessionId === null)
-                  ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
-              )}>
-                <SquarePen className="h-4 w-4" />
-              </div>
-            </button>
-            )}
             {visibleNavItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -398,7 +278,7 @@ function Layout() {
 
       {/* 主内容区 + Artifact 预览面板（flex 行：面板占用空间、从右滑入推挤内容） */}
       <main className="flex-1 min-w-0 flex overflow-hidden">
-        <div className={cn('flex-1 min-w-0 overflow-auto bg-background', !isChat && 'p-6')}>
+        <div className="flex-1 min-w-0 overflow-auto bg-background p-6">
           <Outlet />
         </div>
         <ArtifactPanel />

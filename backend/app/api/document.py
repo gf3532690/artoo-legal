@@ -31,7 +31,7 @@ from app.schema.db import (
     SessionChunk,
     SessionFile,
 )
-from app.session_upload.limits import get_upload_limit_resolver
+from app.pipeline.limits import get_upload_limit_resolver
 from app.storage.database import async_session
 from app.storage.milvus import MilvusClient, get_milvus_client
 from app.storage.object_store import (

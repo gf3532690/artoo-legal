@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from app.pipeline.ocr.provider import OCRResult
     from app.pipeline.asr.manager import ASRManager
     from app.pipeline.queue import TaskQueue
-    from app.session_upload.limits import UploadLimits
+    from app.pipeline.limits import UploadLimits
 
 logger = logging.getLogger(__name__)
 
@@ -598,7 +598,7 @@ class DocumentPipeline:
                 # 取一次租户级生效限制快照（KB 路径仅消费 kb_chunk_cap，由 process_to_vectors
                 # 内部用于 Pre_Embed_Gate 判定；Req 9.3 单次校验全程复用）。
                 # tenant_id 以 KnowledgeBase.tenant_id 为权威来源（Worker 无请求上下文）。
-                from app.session_upload.limits import get_upload_limit_resolver
+                from app.pipeline.limits import get_upload_limit_resolver
 
                 kb_tenant_result = await session.execute(
                     select(KnowledgeBase.tenant_id).where(KnowledgeBase.id == kb_id)

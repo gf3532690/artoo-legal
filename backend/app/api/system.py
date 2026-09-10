@@ -23,7 +23,7 @@ from app.retrieval.config import (
     validate_patch,
     validate_platform_patch,
 )
-from app.session_upload.memory import recommend_kb_chunk_cap
+from app.retrieval.memory import recommend_kb_chunk_cap
 from app.storage.graph_store import get_graph_store
 from app.storage.invalidation import get_invalidation_bus
 from app.storage.milvus import get_milvus_client
@@ -476,7 +476,7 @@ async def reset_retrieval_config(
 class MemoryRecommendationVO(BaseModel):
     """单库 chunk 上限（KB_Chunk_Cap）的内存推荐值（信息性，不自动写入，Req 5.1/5.3/5.6）。
 
-    字段与 ``app.session_upload.memory.recommend_kb_chunk_cap`` 返回的 dict 同名同型，
+    字段与 ``app.retrieval.memory.recommend_kb_chunk_cap`` 返回的 dict 同名同型，
     可直接 ``MemoryRecommendationVO(**recommend_kb_chunk_cap())`` 构造。
     """
 

@@ -433,11 +433,12 @@ class GraphExtractWorker:
     async def _get_extract_llm(self, cfg: GraphKBConfig):
         """取抽取用 LLM：指定 ``extract_model_id`` 则用之，否则用 KB / 系统默认。
 
-        复用 ``app.api.chat._get_llm_for_request`` 的模型选择逻辑（懒导入避免循环依赖）。
+        复用 ``app.models.llm_resolver.get_llm_for_request`` 的模型选择逻辑
+        （懒导入避免循环依赖）。
         """
-        from app.api.chat import _get_llm_for_request
+        from app.models.llm_resolver import get_llm_for_request
 
-        llm, _stream, _max_ctx = await _get_llm_for_request(cfg.extract_model_id)
+        llm, _stream, _max_ctx = await get_llm_for_request(cfg.extract_model_id)
         return llm
 
     def _get_embedder(self):

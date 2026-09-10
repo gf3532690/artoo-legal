@@ -55,11 +55,9 @@ async def reload_capability_locally(capability: str) -> None:
             # API 进程无常驻 OCR/ASR Manager，无需动作
             logger.debug("能力配置 %s 本进程无常驻实例，跳过本地重载", capability)
         elif capability == CAPABILITY_MCP:
-            # MCP 工具发现缓存是进程内模块级单例，直接失效，下次 get 重新查库发现
-            from app.agent.tools.mcp_client import invalidate_mcp_tools_cache
-
-            invalidate_mcp_tools_cache()
-            logger.info("MCP 工具发现缓存已失效，下次请求重新发现")
+            # MCP 链路已随非召回链路移除（见方案 D7）：本产品线不再有 MCP 工具发现缓存
+            # 需要失效。保留分支以确保历史配置广播不会走到「未知能力类型」告警。
+            logger.debug("MCP 能力在本产品线已移除，跳过本地重载")
         else:
             logger.warning("未知能力配置类型，跳过重载: %s", capability)
     except Exception as e:  # noqa: BLE001 — 重载失败不影响配置保存

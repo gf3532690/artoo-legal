@@ -5,16 +5,12 @@ import KnowledgeBase from './pages/KnowledgeBase'
 import Documents from './pages/Documents'
 import KnowledgeGraph from './pages/KnowledgeGraph'
 import LegalLibrary from './pages/LegalLibrary'
-import Chat from './pages/Chat'
 import Retrieval from './pages/Retrieval'
 import ApiKeys from './pages/ApiKeys'
 import Models from './pages/Models'
 import EmbedConfig from './pages/EmbedConfig'
 import OcrServices from './pages/OcrServices'
 import AsrServices from './pages/AsrServices'
-import McpServers from './pages/McpServers'
-import AgentConfig from './pages/AgentConfig'
-import Skills from './pages/Skills'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -80,15 +76,11 @@ function App() {
         <Route path="knowledge-bases" element={<KnowledgeBase />} />
         <Route path="knowledge-bases/:id" element={<Documents />} />
         <Route path="knowledge-bases/:id/graph" element={<KnowledgeGraph />} />
-        <Route path="chat" element={<Chat />} />
         <Route path="retrieval" element={<Retrieval />} />
         <Route path="models" element={<Models />} />
-        <Route path="agent-config" element={<AgentConfig />} />
-        <Route path="skills" element={<Skills />} />
         <Route path="embed-config" element={<EmbedConfig />} />
         <Route path="ocr-services" element={<OcrServices />} />
         <Route path="asr-services" element={<AsrServices />} />
-        <Route path="mcp-servers" element={<McpServers />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="tenants" element={<Tenants />} />
         <Route path="users" element={<Users />} />

@@ -27,15 +27,11 @@ from app.retrieval.base import RetrievalResult
 from app.retrieval.factory import build_hybrid_retriever
 from app.pipeline.legal_metadata import strip_content_prefix
 from app.retrieval.legal_scope import resolve_global_legal_kb_ids
-from app.retrieval.log_safety import sanitize_for_log
 from app.retrieval.multi_kb import KBRetrievalConfig, MultiKBRetriever
 from app.retrieval.vector import VectorRetriever
-from app.session_upload.service import get_session_upload_service
 from app.storage.database import async_session
 from app.storage.milvus import (
-    SESSION_FILES_KB_ID,
     MilvusClient,
-    build_session_id_expr,
     get_milvus_client,
 )
 
@@ -44,7 +40,6 @@ from app.api.errors import PermissionDeniedError
 from app.auth.identity import IdentityContext
 from app.auth.kb_authz import KbAccessEnum
 from app.auth.kb_scope import authorize_requested_kbs
-from app.auth.session_ownership import verify_session_owner
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +49,19 @@ router = APIRouter(prefix="/api/retrieval", tags=["Retrieval"])
 async def _authorize_and_boundary(
     identity: IdentityContext,
     kb_ids: list[str],
-    session_id: str | None = None,
 ) -> None:
     """召回前置授权（触达 Milvus 前先拒）。
 
     - 内容边界：超管默认不可读业务正文。
     - KB 读授权：逐个校验 ``kb_ids`` 处于身份可读范围（跨租户/不可读 → 404）。
-    - 会话归属：若指定 ``session_id``，校验其归属调用者本人（防止凭他人 session_id
-      召回其附件内容），非本人 → 404（存在性非泄露）。
+
+    会话附件的归属校验已随会话链路移除（见方案 D7）。
     """
     if identity.is_super_admin and not get_settings().content_view_boundary_open:
         raise PermissionDeniedError("超级管理员默认不可查看业务内容正文")
     if kb_ids:
         async with async_session() as session:
             await authorize_requested_kbs(session, identity, kb_ids, KbAccessEnum.READ)
-    if session_id:
-        await verify_session_owner(session_id, identity)
 
 
 # ============================================================
@@ -193,8 +185,15 @@ async def _run_retrieval(
       父块扩展，并返回链路追踪。图谱第四路经 ``build_hybrid_retriever`` 按全局开关 + 图存储
       可用性注入，与生产问答链路（chat）同口径；未开启图谱时行为与三路完全一致。
     """
+    # 会话链路已随非召回链路移除（见方案 D7）。显式传入 session_id 时直接拒绝，
+    # 而不是静默忽略——否则调用方会以为附件也参与了召回。
+    if body.session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="本部署不支持 session_id：会话附件链路已移除，请改用 kb_ids",
+        )
+
     kb_ids = body.resolve_kb_ids()
-    session_id = body.session_id
 
     # 法条库部署：**全局法条库默认并入检索范围**，调用方不必（也不应）自己传。
     # 并入位置在授权之前，让它像其它源一样走同一套读授权判定——单租户部署下
@@ -205,22 +204,19 @@ async def _run_retrieval(
         # 去重且保持顺序：调用方若自己传了全局库 id，不会产生重复源。
         kb_ids = list(dict.fromkeys([*kb_ids, *global_kb_ids]))
 
-    if not kb_ids and not session_id:
+    if not kb_ids:
+        # 正常不会到这里：全局法条库若已引导，上面必然补入至少一个库。
         raise HTTPException(
             status_code=400,
-            detail="必须指定 knowledge_base_id / kb_ids 或 session_id",
+            detail="未找到全局法条库，且未指定 knowledge_base_id / kb_ids",
         )
 
-    # 触达 Milvus 前先校验：内容边界 + KB 读权限（跨租户/不可读 404）+ 会话归属（非本人 404）。
-    await _authorize_and_boundary(identity, kb_ids, session_id)
+    # 触达 Milvus 前先校验：内容边界 + KB 读权限（跨租户/不可读 404）。
+    await _authorize_and_boundary(identity, kb_ids)
 
-    # 多源（多库 或 含会话附件）走 MultiKBRetriever 混合召回（与生产 chat 同口径）；
-    # 单库单源保留原 direct/hybrid + trace 行为，零回归。
-    is_multi_source = len(kb_ids) > 1 or session_id is not None
-    if is_multi_source:
-        return await _run_multi_source_retrieval(
-            body, kb_ids, session_id, identity, global_kb_ids
-        )
+    # 多源（多库）走 MultiKBRetriever 混合召回；单库单源保留 direct/hybrid + trace。
+    if len(kb_ids) > 1:
+        return await _run_multi_source_retrieval(body, kb_ids, identity, global_kb_ids)
 
     return await _run_single_kb_retrieval(body, kb_ids[0], global_kb_ids)
 
@@ -281,38 +277,21 @@ async def _run_single_kb_retrieval(
 async def _run_multi_source_retrieval(
     body: RetrievalTestRequest,
     kb_ids: list[str],
-    session_id: str | None,
     identity: IdentityContext,
     global_kb_ids: list[str] | None = None,
 ) -> RetrievalTestResponse:
-    """多库 / 会话附件联合检索：走 ``MultiKBRetriever`` 混合召回（与生产 chat 同口径）。
+    """多库联合检索：走 ``MultiKBRetriever`` 混合召回。
 
     各源同权（priority=1.0），最终顺序交由统一 rerank 决定；trace 返回 ``null``
     （多源不聚合单源链路信号），并以 ``degraded`` / ``failed_source_count`` 反映源失败情况。
-    会话附件源以 ``SESSION_FILES_KB_ID`` + ``session_id`` 标量 expr 隔离，与知识库源同权并入。
+
+    会话附件源已随会话链路移除（见方案 D7）。
     """
     start = time.perf_counter()
     kb_configs: list[KBRetrievalConfig] = [
         KBRetrievalConfig(kb_id=kb_id, priority=1.0) for kb_id in kb_ids
     ]
 
-    # 追加会话附件源（仅当会话确有已上传文件；探测失败降级为不含会话源，不阻塞主流程）。
-    if session_id:
-        try:
-            if await get_session_upload_service().has_files(session_id):
-                kb_configs.append(
-                    KBRetrievalConfig(
-                        kb_id=SESSION_FILES_KB_ID,
-                        priority=1.0,
-                        expr=build_session_id_expr(session_id),
-                    )
-                )
-        except Exception as e:
-            logger.warning(
-                "探测会话文件源失败，本次检索将不包含会话源: %s", sanitize_for_log(e)
-            )
-
-    # 只传了 session_id 但该会话无附件 → 无检索源，返回空结果（非错误）。
     if not kb_configs:
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return RetrievalTestResponse(
@@ -333,7 +312,7 @@ async def _run_multi_source_retrieval(
         apply_rerank_filter=False,
     )
     items = await _build_result_items(
-        multi_result.results, session_id=session_id, global_kb_ids=global_kb_ids
+        multi_result.results, global_kb_ids=global_kb_ids
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
@@ -387,23 +366,15 @@ async def retrieval_search(
 async def _build_result_items(
     results: list[RetrievalResult],
     per_result: dict | None = None,
-    session_id: str | None = None,
     global_kb_ids: list[str] | None = None,
 ) -> list[RetrievalResultItem]:
     """将检索结果转换为响应格式，附带文件名与（可选的）链路分数信号。
 
-    命中来源分两类，按 ``doc_id`` 归属识别，并以 ``source_type`` 标注供前端选对原件接口：
-    - 知识库文档（``source_type="knowledge_base"``）：``doc_id`` 命中 ``documents`` 表，
-      原件走 ``/api/documents/{doc_id}/raw``。
-    - 会话附件（``source_type="session"``）：``doc_id`` 是 ``SessionFile.id``（不在 documents
-      表），仅在带 ``session_id`` 的多源检索中出现，从 ``session_files`` 表补齐文件名，
-      原件走 ``/api/sessions/{session_id}/files/{doc_id}/raw``。
-
-    原件获取由第三方前端按 ``doc_id`` + ``source_type`` 自行调用对应原件接口，本响应不返回原件 URL。
+    ``source_type`` 恒为 ``knowledge_base``：会话附件来源已随会话链路移除（见方案 D7）。
+    原件获取由第三方前端按 ``doc_id`` 自行调用 ``/api/documents/{doc_id}/raw``，本响应不返回原件 URL。
     """
     doc_ids = list({r.doc_id for r in results})
     doc_filenames: dict[str, str] = {}
-    session_file_ids: set[str] = set()
     if doc_ids:
         async with async_session() as session:
             from app.schema.db import Document
@@ -413,22 +384,6 @@ async def _build_result_items(
             )
             for row in result:
                 doc_filenames[row.id] = row.filename
-
-            # 会话附件的 doc_id 是 SessionFile.id（不在 documents 表）。仅在带 session_id 的
-            # 多源检索中才可能出现，补查 session_files 表回填文件名并标记来源，否则命中项
-            # 文件名为空、且前端无法区分来源类型。
-            missing_ids = [d for d in doc_ids if d not in doc_filenames]
-            if missing_ids and session_id:
-                from app.schema.db import SessionFile
-
-                sf_result = await session.execute(
-                    select(SessionFile.id, SessionFile.filename).where(
-                        SessionFile.id.in_(missing_ids)
-                    )
-                )
-                for row in sf_result:
-                    doc_filenames[row.id] = row.filename
-                    session_file_ids.add(row.id)
 
     # 法条元数据水合：按 chunk_id 批量取一次 Chunk，拿到 chunk_metadata 与 kb_id。
     # 与上面的文件名水合同属「一次批量查」模式——禁止按结果逐条查询（N 次单查）。
@@ -456,7 +411,7 @@ async def _build_result_items(
     items: list[RetrievalResultItem] = []
     for r in results:
         trace_entry = (per_result or {}).get(r.chunk_id, {})
-        source_type = "session" if r.doc_id in session_file_ids else "knowledge_base"
+        source_type = "knowledge_base"
 
         metadata = dict(r.metadata or {})
         legal_raw = chunk_legal.get(r.chunk_id, {})

@@ -2384,10 +2384,14 @@ class Neo4jGraphStore(GraphStore):
 
     @staticmethod
     async def _get_summary_llm():
-        """取社区摘要生成用 LLM（复用 chat 的默认模型选择逻辑，懒导入避免循环依赖）。"""
-        from app.api.chat import _get_llm_for_request
+        """取社区摘要生成用 LLM（懒导入避免循环依赖）。
 
-        llm, _stream, _max_ctx = await _get_llm_for_request(None)
+        解析逻辑在 ``app.models.llm_resolver``：原先定义在 ``api/chat.py``，
+        对话链路被删除后搬到中立模块（图谱按「配置关闭、模块保留」保留）。
+        """
+        from app.models.llm_resolver import get_llm_for_request
+
+        llm, _stream, _max_ctx = await get_llm_for_request(None)
         return llm
 
     @staticmethod
