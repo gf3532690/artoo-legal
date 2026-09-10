@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/simplification/2026-09-10-remove-non-recall-chain.md .agents/notes/implemented/simplification/2026-09-10-remove-non-recall-chain.zh.md
+2026-09-10-remove-non-recall-chain.md: aa345634103a1b8687d72c5e381ce04f38655475
+2026-09-10-remove-non-recall-chain.zh.md: 69285341c16c5fcea54a1d6c5207a0025c53aeac

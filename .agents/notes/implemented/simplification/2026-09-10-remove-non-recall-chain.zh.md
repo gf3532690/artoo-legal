@@ -1,6 +1,6 @@
 # Agent Note: Remove the non-recall chain
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -20,9 +20,10 @@ MCP 客户端与服务端、技能、智能体预设、会话与会话附件—�
 必须先解决六处耦合，否则按目录删除会打断无关功能：
 
 1. `session_upload/limits.py` 不是会话专属——它是普通上传的容量校验器，被
-   `api/document.py` 与 `pipeline/pipeline.py` 使用。删除该包之前先把它挪到中立位置。
+   `api/document.py` 与 `pipeline/pipeline.py` 使用。它被挪到 `app/pipeline/limits.py`。
 2. `api/retrieval.py` 为会话附件源引用了 `session_upload.service`；移除该分支。
-3. `api/system.py` 从 `session_upload.memory` 引用了 `recommend_kb_chunk_cap`。
+3. `api/system.py` 从 `session_upload.memory` 引用了 `recommend_kb_chunk_cap`——
+   那是 KB chunk 上限推荐，本就与会话无关。它被挪到 `app/retrieval/memory.py`。
 4. `api/capability_reload.py` 从 `app.agent.tools.mcp_client` 引用了
    `invalidate_mcp_tools_cache`。
 5. `main.py` 在 lifespan 中初始化会话上传的 EventHub、队列与订阅循环。

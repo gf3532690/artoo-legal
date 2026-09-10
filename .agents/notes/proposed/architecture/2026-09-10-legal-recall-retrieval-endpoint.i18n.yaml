@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record: the Git blob hash of each side as of the
-# last confirmed-consistent state. Both languages carry equal authority; after
-# editing either side, bring the other along and re-record both hashes with:
-#   git hash-object .agents/notes/proposed/architecture/2026-09-10-legal-recall-retrieval-endpoint.md .agents/notes/proposed/architecture/2026-09-10-legal-recall-retrieval-endpoint.zh.md
-2026-09-10-legal-recall-retrieval-endpoint.md: ff37d5edf2da54a857670e1bc0cf7c103479b952
-2026-09-10-legal-recall-retrieval-endpoint.zh.md: d72375f26ed4ed80c13d38dcde6c0db9a9ef422b

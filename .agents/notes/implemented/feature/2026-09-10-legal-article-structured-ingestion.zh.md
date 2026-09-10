@@ -1,6 +1,6 @@
 # Agent Note: Legal article structured ingestion
 
-Status: proposed
+Status: implemented
 
 ## Problem
 

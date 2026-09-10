@@ -1,6 +1,6 @@
 # Agent Note: Remove the non-recall chain
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -25,10 +25,12 @@ unrelated features:
 
 1. `session_upload/limits.py` is not session-specific — it is the ordinary
    upload capacity checker used by `api/document.py` and `pipeline/pipeline.py`.
-   Move it to a neutral location before removing the package.
+   It moves to `app/pipeline/limits.py`.
 2. `api/retrieval.py` imports `session_upload.service` for the session
    attachment source; remove that branch.
-3. `api/system.py` imports `recommend_kb_chunk_cap` from `session_upload.memory`.
+3. `api/system.py` imports `recommend_kb_chunk_cap` from `session_upload.memory`
+   — a KB chunk-cap recommendation that was never session-specific either. It
+   moves to `app/retrieval/memory.py`.
 4. `api/capability_reload.py` imports `invalidate_mcp_tools_cache` from
    `app.agent.tools.mcp_client`.
 5. `main.py` initializes the session-upload EventHub, queue and subscribe loop

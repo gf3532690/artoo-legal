@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record: the Git blob hash of each side as of the
-# last confirmed-consistent state. Both languages carry equal authority; after
-# editing either side, bring the other along and re-record both hashes with:
-#   git hash-object .agents/notes/proposed/architecture/2026-09-10-single-tenant-legal-bootstrap.md .agents/notes/proposed/architecture/2026-09-10-single-tenant-legal-bootstrap.zh.md
-2026-09-10-single-tenant-legal-bootstrap.md: df22e5fa4ca8be69ca4f2bb102d59b8f69eaeec4
-2026-09-10-single-tenant-legal-bootstrap.zh.md: 1378427ea6410897dd77b1d247d04785b96479ca

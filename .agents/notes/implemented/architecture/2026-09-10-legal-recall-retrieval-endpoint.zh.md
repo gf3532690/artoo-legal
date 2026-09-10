@@ -1,6 +1,6 @@
 # Agent Note: Legal recall reuses the existing retrieval endpoint
 
-Status: proposed
+Status: implemented
 
 ## Problem
 

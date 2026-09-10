@@ -1,6 +1,6 @@
 # Agent Note: Single-tenant bootstrap for the legal library
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
