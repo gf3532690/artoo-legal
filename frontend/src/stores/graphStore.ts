@@ -26,7 +26,7 @@ import {
 export type GraphMode = 'overview' | 'ego'
 
 interface GraphState {
-  // —— 当前作用的知识库 ——
+  // —— 当前作用的法条库 ——
   kbId: string | null
 
   // —— 查询参数 ——

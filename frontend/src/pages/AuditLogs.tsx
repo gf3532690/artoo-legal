@@ -15,7 +15,7 @@ const ACTION_LABEL: Record<string, string> = {
   'apikey.proxy_create': '签发代理Key', 'apikey.proxy_revoke': '撤销代理Key',
   'user.create': '创建用户', 'user.set_status': '启停用户',
   'user.reset_password': '重置密码', 'user.set_roles': '分配角色',
-  'user.transfer_kb': '转移知识库',
+  'user.transfer_kb': '转移法条库',
   'role.create': '创建角色', 'role.set_permissions': '改角色权限', 'role.delete': '删除角色',
   'apikey.create': '创建Key', 'apikey.revoke': '撤销Key', 'apikey.update_scope': '改Key范围',
   'kb.set_visibility': '改KB可见性', 'kb.share': '共享KB', 'kb.revoke_share': '撤销共享',

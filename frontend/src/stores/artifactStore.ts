@@ -4,11 +4,11 @@ import { create } from 'zustand'
  * Artifact 面板全局状态。
  *
  * Artifact 是承载不同类型文件预览的公用侧栏：从右侧滑入、占用布局空间（非浮层）。
- * 通过全局 store 暴露 open/close，任意页面（知识库文档、会话附件等）都能触发预览，
+ * 通过全局 store 暴露 open/close，任意页面（法条库文档、会话附件等）都能触发预览，
  * 而无需层层透传 props，保持数据流清晰。
  */
 
-/** 预览来源：知识库文档 / 会话附件。决定取原件的接口。 */
+/** 预览来源：法条库文档 / 会话附件。决定取原件的接口。 */
 export type ArtifactSource = 'document' | 'session-file'
 
 export interface ArtifactTarget {

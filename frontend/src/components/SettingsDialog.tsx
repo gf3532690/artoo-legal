@@ -143,8 +143,8 @@ interface RetrievalGroup {
 }
 
 // 索引档共用提示文案。
-// 全部知识库共用一个 Milvus collection（以 kb_id 作为 Partition Key 分区），
-// 建索引参数在该 collection 建表时一次性固化，之后新建知识库不会重建索引，
+// 全部法条库共用一个 Milvus collection（以 kb_id 作为 Partition Key 分区），
+// 建索引参数在该 collection 建表时一次性固化，之后新建法条库不会重建索引，
 // 因此这两项只在重建向量集合（make milvus-reset）后生效。
 const INDEX_BUILD_HINT = '建索引参数在向量集合建表时固化，修改需重建向量集合后生效，且增大将提高内存占用'
 
@@ -213,14 +213,14 @@ const RETRIEVAL_GROUPS: RetrievalGroup[] = [
   },
 ]
 
-// 上传限制档（租户级；仅 upload_max_file_mb 仍生效，会话上传与知识库上传共用）。
-// 注：会话文件数上限 / 会话累计 chunk 上限已废弃——临时文件本质 = 会话级知识库，
+// 上传限制档（租户级；仅 upload_max_file_mb 仍生效，会话上传与法条库上传共用）。
+// 注：会话文件数上限 / 会话累计 chunk 上限已废弃——临时文件本质 = 会话级法条库，
 // 容量统一由平台级 kb_chunk_cap 约束，不再有会话专属配额。
 const UPLOAD_GROUPS: RetrievalGroup[] = [
   {
     title: '文件大小',
     icon: HardDrive,
-    description: '单个上传文件允许的最大体积，会话上传与知识库上传共用同一上限',
+    description: '单个上传文件允许的最大体积，会话上传与法条库上传共用同一上限',
     fields: [
       {
         key: 'upload_max_file_mb',
@@ -797,7 +797,7 @@ function PlatformSection() {
             />
             <p className="text-[11px] text-muted-foreground">
               控制向量集合加载缓存有效期（秒），范围 [{LOAD_CACHE_TTL_MIN}, {LOAD_CACHE_TTL_MAX}]。
-              全部知识库共用一个向量集合，任一知识库写入都会失效该缓存。
+              全部法条库共用一个向量集合，任一法条库写入都会失效该缓存。
             </p>
           </div>
         </div>
@@ -844,7 +844,7 @@ function PlatformSection() {
               disabled={isLoading || !form}
             />
             <p className="text-[11px] text-muted-foreground">
-              单个知识库（含会话临时文件）允许容纳的 child chunk 总数上限，范围 [
+              单个法条库（含会话临时文件）允许容纳的 child chunk 总数上限，范围 [
               {KB_CHUNK_CAP_MIN.toLocaleString()}, {KB_CHUNK_CAP_MAX.toLocaleString()}]。
             </p>
           </div>

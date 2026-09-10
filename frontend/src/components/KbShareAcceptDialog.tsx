@@ -9,9 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import Aurora from '@/components/reactbits/Aurora'
 
-// 跨租户知识库分享领取弹窗（cross-tenant-kb-share）。
-// 由知识库列表页挂载：当 URL 带 ?share=<token> 时自动弹出确认框，支持「加入 / 不加入」。
-// 加入成功后刷新知识库列表缓存，使被授权库立即出现在列表中。
+// 跨租户法条库分享领取弹窗（cross-tenant-kb-share）。
+// 由法条库列表页挂载：当 URL 带 ?share=<token> 时自动弹出确认框，支持「加入 / 不加入」。
+// 加入成功后刷新法条库列表缓存，使被授权库立即出现在列表中。
 export default function KbShareAcceptDialog() {
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -36,9 +36,9 @@ export default function KbShareAcceptDialog() {
     setAccepting(true)
     try {
       await kbShareLinkApi.accept(token)
-      // 关键：领取后刷新列表缓存，被授权库才会出现在「我的知识库」列表中。
+      // 关键：领取后刷新列表缓存，被授权库才会出现在「我的法条库」列表中。
       await queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] })
-      toast.success('已加入，知识库已出现在你的列表中')
+      toast.success('已加入，法条库已出现在你的列表中')
       close()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '加入失败')
@@ -100,14 +100,14 @@ export default function KbShareAcceptDialog() {
               </div>
 
               {/* 标题（正常字体） */}
-              <DialogTitle className="mt-4 text-base font-semibold">收到一个知识库分享</DialogTitle>
+              <DialogTitle className="mt-4 text-base font-semibold">收到一个法条库分享</DialogTitle>
 
-              {/* 句式文案：覆盖团队 / 分享者 / 知识库三要素 */}
+              {/* 句式文案：覆盖团队 / 分享者 / 法条库三要素 */}
               <DialogDescription className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 <span className="font-medium text-foreground">{info.owner_tenant_name || '某团队'}</span>
                 {' 团队的 '}
                 <span className="font-medium text-foreground">{info.owner_username || '一位成员'}</span>
-                {' 将他的知识库 '}
+                {' 将他的法条库 '}
                 <span className="font-medium text-foreground">{info.kb_name}</span>
                 {' 分享给你'}
               </DialogDescription>
@@ -138,7 +138,7 @@ export default function KbShareAcceptDialog() {
               onClick={onAccept}
               disabled={accepting || isLoading || !canAccept}
             >
-              {accepting ? '加入中…' : '加入知识库'}
+              {accepting ? '加入中…' : '加入法条库'}
             </Button>
           </div>
         </div>

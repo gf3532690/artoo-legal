@@ -7,7 +7,7 @@ interface CardGridSkeletonProps {
 
 /**
  * 卡片网格骨架屏。
- * 结构对齐知识库/模型/Agent 预设/OCR 服务等卡片：图标 + 标题 + 描述 + 底部操作行。
+ * 结构对齐法条库/模型/Agent 预设/OCR 服务等卡片：图标 + 标题 + 描述 + 底部操作行。
  */
 function CardGridSkeleton({ count = 6 }: CardGridSkeletonProps) {
   return (

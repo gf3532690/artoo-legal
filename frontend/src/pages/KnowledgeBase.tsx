@@ -27,7 +27,7 @@ import KBCapacityBar from '@/components/KBCapacityBar'
 import KbShareAcceptDialog from '@/components/KbShareAcceptDialog'
 import { toast } from 'sonner'
 
-// 知识库数据类型（kb-sharing-refinement：附带归属、可见性与组织开放维度，用于前端按钮显隐 + 关系标签）
+// 法条库数据类型（kb-sharing-refinement：附带归属、可见性与组织开放维度，用于前端按钮显隐 + 关系标签）
 interface KnowledgeBaseItem {
   id: string
   name: string
@@ -82,7 +82,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'docs', label: '文档数' },
 ]
 
-// 知识库管理页面
+// 法条库管理页面
 function KnowledgeBase() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -171,7 +171,7 @@ function KnowledgeBase() {
     return '私有'
   }
 
-  // 获取知识库列表（分页 + 滚动加载，按筛选/排序/搜索）
+  // 获取法条库列表（分页 + 滚动加载，按筛选/排序/搜索）
   const PAGE_SIZE = 20
   const {
     data,
@@ -218,7 +218,7 @@ function KnowledgeBase() {
     enabled: !!shareKb,
   })
 
-  // 创建知识库
+  // 创建法条库
   const createMutation = useMutation({
     mutationFn: async (data: FormData) => {
       const visibility = data.visibility === 'private' ? 'private' : 'organization'
@@ -242,7 +242,7 @@ function KnowledgeBase() {
     },
   })
 
-  // 更新知识库（仅改名称/描述；可见性由专门的可见性对话框处理）。
+  // 更新法条库（仅改名称/描述；可见性由专门的可见性对话框处理）。
   // 图谱类型是建库时定型的属性，编辑不允许切换，故此处不触碰 graph 配置。
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: FormData }) =>
@@ -253,7 +253,7 @@ function KnowledgeBase() {
     },
   })
 
-  // 删除知识库
+  // 删除法条库
   const deleteMutation = useMutation({
     mutationFn: (id: string) => knowledgeBaseApi.delete(id),
     onSuccess: () => {
@@ -261,7 +261,7 @@ function KnowledgeBase() {
     },
   })
 
-  // 共享知识库给指定用户
+  // 共享法条库给指定用户
   const shareMutation = useMutation({
     mutationFn: ({ kbId, userIds }: { kbId: string; userIds: string[] }) =>
       knowledgeBaseApi.share(kbId, { user_ids: userIds, permission: sharePermission }),
@@ -334,13 +334,13 @@ function KnowledgeBase() {
     setShowDialog(true)
   }
 
-  // 删除知识库（统一确认交互）
+  // 删除法条库（统一确认交互）
   async function handleDelete(kb: KnowledgeBaseItem) {
     const ok = await confirm({
-      title: '删除知识库',
+      title: '删除法条库',
       description: (
         <>
-          确定要删除知识库「{kb.name}」吗？该知识库下的所有文档与向量数据将被一并清除，此操作不可撤销。
+          确定要删除法条库「{kb.name}」吗？该法条库下的所有文档与向量数据将被一并清除，此操作不可撤销。
         </>
       ),
     })
@@ -424,12 +424,12 @@ function KnowledgeBase() {
       {/* 页面头部 */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">知识库</h1>
-          <p className="text-muted-foreground text-sm mt-1">管理您的知识库，上传文档并配置检索策略</p>
+          <h1 className="text-2xl font-bold tracking-tight">法条库</h1>
+          <p className="text-muted-foreground text-sm mt-1">管理您的法条库，上传文档并配置检索策略</p>
         </div>
         <Button onClick={openCreate} className="gap-2">
           <Plus className="h-4 w-4" />
-          新建知识库
+          新建法条库
         </Button>
       </div>
 
@@ -464,7 +464,7 @@ function KnowledgeBase() {
             <Input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="搜索知识库"
+              placeholder="搜索法条库"
               className="pl-8 pr-8 h-9 w-48"
             />
             {searchInput && (
@@ -499,7 +499,7 @@ function KnowledgeBase() {
         </div>
       </div>
 
-      {/* 知识库列表 */}
+      {/* 法条库列表 */}
       {isLoading ? (
         <CardGridSkeleton count={6} />
       ) : knowledgeBases.length === 0 ? (
@@ -509,7 +509,7 @@ function KnowledgeBase() {
             <div className="w-16 h-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-4">
               <Search className="h-8 w-8 text-muted-foreground/60" />
             </div>
-            <p className="text-muted-foreground mb-1">没有符合条件的知识库</p>
+            <p className="text-muted-foreground mb-1">没有符合条件的法条库</p>
             <p className="text-sm text-muted-foreground/70 mb-4">试试切换筛选条件或清空搜索</p>
             <Button
               variant="outline"
@@ -526,10 +526,10 @@ function KnowledgeBase() {
             <div className="w-16 h-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-4">
               <Database className="h-8 w-8 text-muted-foreground/60" />
             </div>
-            <p className="text-muted-foreground mb-4">还没有知识库，创建一个开始吧</p>
+            <p className="text-muted-foreground mb-4">还没有法条库，创建一个开始吧</p>
             <Button onClick={openCreate} variant="outline" className="gap-2">
               <Plus className="h-4 w-4" />
-              新建知识库
+              新建法条库
             </Button>
           </div>
         )
@@ -664,7 +664,7 @@ function KnowledgeBase() {
       <Dialog open={showDialog} onOpenChange={closeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingItem ? '编辑知识库' : '新建知识库'}</DialogTitle>
+            <DialogTitle>{editingItem ? '编辑法条库' : '新建法条库'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -672,7 +672,7 @@ function KnowledgeBase() {
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="输入知识库名称"
+                placeholder="输入法条库名称"
                 className="mt-1.5"
                 required
               />
@@ -682,7 +682,7 @@ function KnowledgeBase() {
               <Textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="输入知识库描述（可选）"
+                placeholder="输入法条库描述（可选）"
                 className="mt-1.5"
                 rows={3}
               />
@@ -706,7 +706,7 @@ function KnowledgeBase() {
                 开启后该 KB 的文档入库会触发实体/关系抽取，详情页出现「知识图谱」入口。 */}
             {!editingItem && graphGloballyEnabled && (
               <div>
-                <Label className="mb-2 block">知识库类型</Label>
+                <Label className="mb-2 block">法条库类型</Label>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -717,7 +717,7 @@ function KnowledgeBase() {
                         : 'bg-muted/30 border-border text-muted-foreground hover:border-primary/20'
                     }`}
                   >
-                    普通知识库
+                    普通法条库
                   </button>
                   <button
                     type="button"
@@ -781,8 +781,8 @@ function KnowledgeBase() {
       <Dialog open={!!shareKb} onOpenChange={(o) => { if (!o) closeShare() }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>共享知识库 · {shareKb?.name}</DialogTitle>
-            <DialogDescription>把该知识库点对点分享给同空间的一个或多个用户，并指定读 / 写权限。</DialogDescription>
+            <DialogTitle>共享法条库 · {shareKb?.name}</DialogTitle>
+            <DialogDescription>把该法条库点对点分享给同空间的一个或多个用户，并指定读 / 写权限。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div>
@@ -860,7 +860,7 @@ function KnowledgeBase() {
                 <Link2 className="h-3.5 w-3.5" /> 跨团队分享（只读链接）
               </Label>
               <p className="text-xs text-muted-foreground mt-1">
-                生成一个只读分享链接，发给其他团队的成员；对方登录后领取即可访问该知识库。
+                生成一个只读分享链接，发给其他团队的成员；对方登录后领取即可访问该法条库。
               </p>
               {shareLink ? (
                 <div className="mt-2 flex items-center gap-2">

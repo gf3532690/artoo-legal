@@ -82,7 +82,7 @@ export default function Login() {
         {/* 底部品牌文案 */}
         <div className="absolute inset-x-0 bottom-0 z-10 p-12">
           <h2 className="text-4xl font-semibold leading-tight text-white">
-            用 Artoo 构建
+            用 法条库 构建
             <br />
             你的知识中枢
           </h2>
@@ -103,12 +103,12 @@ export default function Login() {
             {/* <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-5 w-5" />
             </div> */}
-            <span className="text-2xl font-semibold font-serif tracking-tight text-foreground">Artoo</span>
+            <span className="text-2xl font-semibold font-serif tracking-tight text-foreground">法条库</span>
           </div>
 
           <div className="mb-8 text-center">
             <h1 className="text-2xl font-semibold text-foreground">欢迎回来</h1>
-            <p className="mt-2 text-sm text-muted-foreground">登录账号，与 Artoo 携手</p>
+            <p className="mt-2 text-sm text-muted-foreground">登录账号，与 法条库 携手</p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-5">
@@ -153,7 +153,7 @@ export default function Login() {
           </form>
 
           <p className="mt-12 text-center text-xs text-muted-foreground">
-            Powered by <span className='font-semibold font-serif'>Artoo</span>
+            Powered by <span className='font-semibold font-serif'>法条库</span>
           </p>
         </div>
       </div>

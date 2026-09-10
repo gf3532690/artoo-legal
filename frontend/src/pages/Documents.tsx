@@ -63,7 +63,7 @@ import type { DocumentItem, UploadingFile, MergedFile } from '@/components/docum
 import { formatSize, statusLabel, statusColor } from '@/components/documents/FileItem'
 import type { FolderData } from '@/components/documents/FolderItem'
 
-// 知识库数据类型
+// 法条库数据类型
 interface KnowledgeBaseItem {
   id: string
   name: string
@@ -100,7 +100,7 @@ function ToolbarTip({
 
 // 文档管理页面 - Finder 风格
 /**
- * 知识库内容维护页。
+ * 法条库内容维护页。
  *
  * 默认从路由参数取库 id（`/knowledge-bases/:id`）；法条库入口（`/legal`）不经该
  * 路由，因此支持通过 `explicitKbId` 显式传入目标库 id。
@@ -163,7 +163,7 @@ function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
     staleTime: 60000, // 1 分钟内不重复请求
   })
 
-  // 获取知识库信息
+  // 获取法条库信息
   const { data: kb } = useQuery({
     queryKey: ['knowledge-base', kbId],
     queryFn: () => knowledgeBaseApi.get(kbId!) as Promise<KnowledgeBaseItem>,
@@ -903,7 +903,7 @@ function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
                 </div>
               </>
             ) : (
-              <p className="text-sm text-muted-foreground/70">该知识库暂无可查看的文档</p>
+              <p className="text-sm text-muted-foreground/70">该法条库暂无可查看的文档</p>
             )}
           </div>
         ) : viewMode === 'grid' ? (
@@ -1222,7 +1222,7 @@ function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
           <DialogHeader>
             <DialogTitle>链接转存</DialogTitle>
             <DialogDescription>
-              粘贴网页或微信公众号文章链接，系统会抓取正文并转存为知识库文档。
+              粘贴网页或微信公众号文章链接，系统会抓取正文并转存为法条库文档。
               动态渲染或需登录的页面可能无法提取。
             </DialogDescription>
           </DialogHeader>

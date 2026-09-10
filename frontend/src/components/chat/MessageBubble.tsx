@@ -75,7 +75,7 @@ export interface Message {
   // 旧格式兼容
   thoughts?: string[]
   toolCalls?: ToolCallStatus[]
-  // 检索降级提示（session-file-upload Req 2.x）：区分会话文件源 / 知识库源失败。
+  // 检索降级提示（session-file-upload Req 2.x）：区分会话文件源 / 法条库源失败。
   // 来自 SSE meta 事件的 metadata，渲染"部分来源检索失败、结果可能不完整"的分类提示。
   sessionSourceFailed?: boolean
   kbSourceFailed?: boolean
@@ -217,17 +217,17 @@ function MessageBubble({
           </>
         )}
 
-        {/* 检索降级提示（session-file-upload Req 2.x）：区分会话文件源 / 知识库源失败。
-            会话源与知识库源可能其一失败、其一成功，分类提示让用户知道结果可能不完整及缺失来源。 */}
+        {/* 检索降级提示（session-file-upload Req 2.x）：区分会话文件源 / 法条库源失败。
+            会话源与法条库源可能其一失败、其一成功，分类提示让用户知道结果可能不完整及缺失来源。 */}
         {(msg.sessionSourceFailed || msg.kbSourceFailed) && (
           <div className="mx-1 flex items-start gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <span>
               {msg.sessionSourceFailed && msg.kbSourceFailed
-                ? '会话文件与知识库检索均部分失败，本次回答可能不完整。'
+                ? '会话文件与法条库检索均部分失败，本次回答可能不完整。'
                 : msg.sessionSourceFailed
                   ? '会话文件检索失败，本次回答未纳入本会话上传文件的内容。'
-                  : '知识库检索部分失败，本次回答可能遗漏部分知识库内容。'}
+                  : '法条库检索部分失败，本次回答可能遗漏部分法条库内容。'}
             </span>
           </div>
         )}

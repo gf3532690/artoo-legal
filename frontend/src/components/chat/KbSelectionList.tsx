@@ -7,18 +7,18 @@ interface KnowledgeBaseItem {
 }
 
 interface KbSelectionListProps {
-  /** 全部可选知识库（用于把已选 ID 映射为名称） */
+  /** 全部可选法条库（用于把已选 ID 映射为名称） */
   knowledgeBases: KnowledgeBaseItem[]
-  /** 已选知识库 ID（按选中顺序） */
+  /** 已选法条库 ID（按选中顺序） */
   selectedKbIds: string[]
-  /** 移除单个已选知识库 */
+  /** 移除单个已选法条库 */
   onRemove: (kbId: string) => void
 }
 
 /**
- * 已选知识库展示区（chip 横向布局），与「已上传文件区」风格一致。
+ * 已选法条库展示区（chip 横向布局），与「已上传文件区」风格一致。
  *
- * 把选中的知识库从 action 工具栏胶囊里抽出来，单独成区渲染，每个 chip 可单独移除。
+ * 把选中的法条库从 action 工具栏胶囊里抽出来，单独成区渲染，每个 chip 可单独移除。
  * 无选中时整块隐藏（由本组件自行判断，父组件无需条件挂载）。
  */
 function KbSelectionList({ knowledgeBases, selectedKbIds, onRemove }: KbSelectionListProps) {
@@ -43,7 +43,7 @@ function KbSelectionList({ knowledgeBases, selectedKbIds, onRemove }: KbSelectio
                   type="button"
                   onClick={() => onRemove(c.id)}
                   className="h-5 w-5 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"
-                  aria-label={`移除知识库 ${c.name}`}
+                  aria-label={`移除法条库 ${c.name}`}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -51,7 +51,7 @@ function KbSelectionList({ knowledgeBases, selectedKbIds, onRemove }: KbSelectio
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs">
               <div className="font-medium break-all leading-snug">{c.name}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">点击 × 取消选择该知识库</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">点击 × 取消选择该法条库</div>
             </TooltipContent>
           </Tooltip>
         ))}

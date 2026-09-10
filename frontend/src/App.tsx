@@ -43,7 +43,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-// 登录后默认落地页：超管为纯平台管理身份（无知识库/对话），落到"租户管理"；
+// 登录后默认落地页：超管为纯平台管理身份（无法条库/对话），落到"租户管理"；
 // 其余身份落到对话页。
 function DefaultLanding() {
   const { isSuperAdmin } = useAuth()

@@ -44,7 +44,7 @@ const VARIANT_META: Record<
   empty: {
     icon: Network,
     title: '暂无图谱数据',
-    desc: '该知识库已开启图谱功能，但尚未抽取出实体与关系。新增文档入库后会自动构建。',
+    desc: '该法条库已开启图谱功能，但尚未抽取出实体与关系。新增文档入库后会自动构建。',
     tone: 'text-muted-foreground/50',
   },
   error: {

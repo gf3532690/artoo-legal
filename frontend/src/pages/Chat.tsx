@@ -52,7 +52,7 @@ function Chat() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedPreset, setSelectedPreset] = useState('')
-  // 已选知识库（按选中顺序，首个即后端主库 kb_ids[0]，检索权重更高）。
+  // 已选法条库（按选中顺序，首个即后端主库 kb_ids[0]，检索权重更高）。
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([])
   const [expandedRefs, setExpandedRefs] = useState<Set<number>>(new Set())
   const [contextUsage, setContextUsage] = useState<{ current: number; max: number }>({ current: 0, max: 0 })
@@ -509,7 +509,7 @@ function Chat() {
         }
         if (restoredUsage) setContextUsage(restoredUsage)
 
-        // 恢复该会话最近一次使用的知识库选择：从最后一条带 kb 信息的消息读取。
+        // 恢复该会话最近一次使用的法条库选择：从最后一条带 kb 信息的消息读取。
         // kb_ids（多选，有序，首个为主库）优先；否则回退单选 kb_id。
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i]
@@ -642,10 +642,10 @@ function Chat() {
     }
 
     try {
-      // 合并知识库选择映射到后端契约（保持既有路由语义不变）：
+      // 合并法条库选择映射到后端契约（保持既有路由语义不变）：
       // - 0 个库 → 都不传；1 个库 → 仅 knowledge_base_id（走 SINGLE_KB，保留单库查询理解链路）；
       // - 2+ 个库 → kb_ids（走 MULTI_KB），数组首个即权重 1.0 的主库。
-      // 重试场景由 overrides.kbIds 显式传入（沿用该轮原始知识库，而非当前选择器状态）。
+      // 重试场景由 overrides.kbIds 显式传入（沿用该轮原始法条库，而非当前选择器状态）。
       const effectiveKbIds = overrides?.kbIds ?? selectedKbIds
       const primaryKb = effectiveKbIds[0] || undefined
       const multiKbIds = effectiveKbIds.length > 1 ? effectiveKbIds : undefined
@@ -688,7 +688,7 @@ function Chat() {
       let buffer = ''
       let isAgentMode = false
       let totalDurationMs: number | undefined = undefined
-      // 检索降级标志（来自 meta 事件 metadata）：区分会话文件源 / 知识库源失败（Req 2.x）
+      // 检索降级标志（来自 meta 事件 metadata）：区分会话文件源 / 法条库源失败（Req 2.x）
       let sessionSourceFailed = false
       let kbSourceFailed = false
       // 本轮 assistant 消息落库后的 DB ID（message_saved 事件回填），供反馈/重试定位
@@ -721,7 +721,7 @@ function Chat() {
             try {
               const parsed = JSON.parse(data)
 
-              // 检索降级元数据（meta 事件携带 metadata；区分会话文件源 / 知识库源失败，Req 2.x）。
+              // 检索降级元数据（meta 事件携带 metadata；区分会话文件源 / 法条库源失败，Req 2.x）。
               // 任何带 metadata 的事件都提取，挂到当前 assistant 消息以渲染分类提示。
               if (parsed.metadata && typeof parsed.metadata === 'object') {
                 if (parsed.metadata.session_source_failed) sessionSourceFailed = true
@@ -1070,7 +1070,7 @@ function Chat() {
     }
   }
 
-  // 重试最新一轮：先调后端删除该轮 user+assistant 消息，再用原问题、知识库与附件重新发起。
+  // 重试最新一轮：先调后端删除该轮 user+assistant 消息，再用原问题、法条库与附件重新发起。
   async function handleRetry() {
     if (!currentSessionId || isStreaming) return
     try {
@@ -1091,8 +1091,8 @@ function Chat() {
       })()
       messagesRef.current = trimmed
       setMessages(trimmed)
-      // 沿用该轮原始知识库（kb_ids 优先，回退单选 kb_id），同步选择器并显式传给重发，
-      // 避免依赖尚未刷新的派生状态导致知识库/附件回落到输入框。
+      // 沿用该轮原始法条库（kb_ids 优先，回退单选 kb_id），同步选择器并显式传给重发，
+      // 避免依赖尚未刷新的派生状态导致法条库/附件回落到输入框。
       const retryKbIds = (retry.kb_ids && retry.kb_ids.length > 0)
         ? retry.kb_ids.filter(Boolean)
         : (retry.kb_id ? [retry.kb_id] : [])
@@ -1316,7 +1316,7 @@ function Chat() {
         </div>
         <div className="relative z-10 w-full max-w-3xl flex flex-col items-center -mt-12">
           <h1 className="text-3xl font-semibold text-foreground text-center mb-8">
-            我是 <span className="font-serif">Artoo</span>，你的知识库问答助手
+            我是 <span className="font-serif">Artoo</span>，你的法条库问答助手
           </h1>
 
           <div className="mb-8 w-full">

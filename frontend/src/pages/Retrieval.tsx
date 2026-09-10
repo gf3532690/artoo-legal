@@ -22,7 +22,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import RetrievalResultsSkeleton from '@/components/skeletons/RetrievalResultsSkeleton'
 
-// 知识库类型
+// 法条库类型
 interface KnowledgeBaseItem {
   id: string
   name: string
@@ -63,7 +63,7 @@ function Retrieval() {
   const [topK, setTopK] = useState(10)
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
 
-  // 获取知识库列表
+  // 获取法条库列表
   const { data: knowledgeBases = [] } = useQuery({
     queryKey: ['knowledge-bases'],
     queryFn: () =>
@@ -141,10 +141,10 @@ function Retrieval() {
 
           {/* 参数行 */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* 知识库 */}
+            {/* 法条库 */}
             <Select value={selectedKb} onValueChange={setSelectedKb}>
               <SelectTrigger className="h-9 w-[200px] text-sm rounded-lg bg-card">
-                <SelectValue placeholder="选择知识库" />
+                <SelectValue placeholder="选择法条库" />
               </SelectTrigger>
               <SelectContent>
                 {knowledgeBases.map((kb) => (
@@ -266,7 +266,7 @@ function Retrieval() {
             <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center mb-4">
               <Search className="h-7 w-7 text-primary/40" />
             </div>
-            <p className="text-sm text-muted-foreground">选择知识库并输入查询内容开始检索</p>
+            <p className="text-sm text-muted-foreground">选择法条库并输入查询内容开始检索</p>
           </div>
         )}
       </div>

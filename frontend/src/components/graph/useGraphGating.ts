@@ -27,7 +27,7 @@ interface GraphGating {
 /**
  * 计算某 KB 的图谱入口可见性（全局 ∧ KB 级双层门控）。
  *
- * @param kbId 知识库 id；为空（未进入具体 KB）时不查询 KB 配置。
+ * @param kbId 法条库 id；为空（未进入具体 KB）时不查询 KB 配置。
  */
 export function useGraphGating(kbId: string | undefined): GraphGating {
   // 第一层：全局能力开关。随前端配置一起缓存（与 Documents 页同 queryKey 复用缓存）。

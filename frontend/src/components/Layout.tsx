@@ -43,7 +43,7 @@ import { useArtifactStore } from '@/stores/artifactStore'
 // 审计日志归 manage（admin 可见），但 Super_Admin 经下方 SUPER_ADMIN_MENUS 单独放行。
 const navItems = [
   // 法条库部署：入口直达全局法条库的内容维护页（仅租户管理员可见）。
-  // 取代上游的「知识库」列表入口——本产品线的库范围由下游决定，
+  // 取代上游的「法条库」列表入口——本产品线的库范围由下游决定，
   // 管理员只需要维护全局法条库。
   { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
   { to: '/agent-config', label: '智能体', icon: Bot, group: 'content' },
@@ -69,7 +69,7 @@ function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
 
-  // 路由切换时关闭 Artifact 预览面板：预览内容（会话附件/知识库文档原件）与具体页面绑定，
+  // 路由切换时关闭 Artifact 预览面板：预览内容（会话附件/法条库文档原件）与具体页面绑定，
   // 离开页面后悬浮的预览已失去上下文，应随之收起。
   const closeArtifact = useArtifactStore((s) => s.closeArtifact)
   useEffect(() => {
@@ -120,8 +120,8 @@ function Layout() {
 
   // 内容与菜单一致性守卫：超管为纯平台管理身份，仅允许访问其菜单内的页面
   // （租户管理 / 审计日志）与账号自助页（改密）。系统设置/个人资料已改为账号
-  // 菜单弹窗（非路由），不在此列。直接命中知识库/对话等页面时，重定向回
-  // "租户管理"，避免出现"左侧无此菜单、右侧却是知识库内容"的错位。
+  // 菜单弹窗（非路由），不在此列。直接命中法条库/对话等页面时，重定向回
+  // "租户管理"，避免出现"左侧无此菜单、右侧却是法条库内容"的错位。
   // 注意：置于所有 hook 调用之后，避免条件式调用 hook。
   // 超管可访问：平台菜单（租户管理/审计日志）、平台能力配置（模型/Embedding/OCR/检索测试/
   // API Key，capability-config-to-platform）、智能体预设（代客配置 MCP 工具，见
@@ -183,7 +183,7 @@ function Layout() {
         >
           {/* 顶部：标题 + toggle */}
           <div className="flex items-center justify-between px-4 py-3">
-            <h1 className="text-lg font-semibold text-sidebar-foreground font-serif">Artoo</h1>
+            <h1 className="text-lg font-semibold text-sidebar-foreground font-serif">法条库</h1>
             <button
               className="h-7 w-7 flex items-center justify-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors cursor-pointer"
               onClick={() => setSidebarOpen(false)}
@@ -193,7 +193,7 @@ function Layout() {
             </button>
           </div>
 
-          {/* 常驻按钮区：新对话 + 导航。超管为纯平台管理身份，不使用对话/知识库功能，隐藏新对话。 */}
+          {/* 常驻按钮区：新对话 + 导航。超管为纯平台管理身份，不使用对话/法条库功能，隐藏新对话。 */}
           <div className="px-3 pt-3 pb-2 space-y-1">
             {!isSuperAdmin && (
               <button

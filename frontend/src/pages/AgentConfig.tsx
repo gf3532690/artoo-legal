@@ -137,7 +137,7 @@ function AgentConfig() {
     },
   })
 
-  // 快捷开放/关闭：直接切换 is_shared，无需进编辑弹窗（参考知识库卡片上的可见性 chip）
+  // 快捷开放/关闭：直接切换 is_shared，无需进编辑弹窗（参考法条库卡片上的可见性 chip）
   const shareToggleMutation = useMutation({
     mutationFn: ({ id, is_shared }: { id: string; is_shared: boolean }) =>
       agentPresetApi.update(id, { is_shared }),
@@ -349,7 +349,7 @@ function AgentConfig() {
               <div className="mt-auto pt-3 border-t border-border/60">
                 {preset.is_owner ? (
                   <div className="flex items-center gap-1 flex-wrap">
-                    {/* 开放/关闭快捷切换（参考知识库可见性 chip，点击即切，无需进编辑） */}
+                    {/* 开放/关闭快捷切换（参考法条库可见性 chip，点击即切，无需进编辑） */}
                     <button
                       onClick={() => shareToggleMutation.mutate({ id: preset.id, is_shared: !preset.is_shared })}
                       disabled={shareToggleMutation.isPending}

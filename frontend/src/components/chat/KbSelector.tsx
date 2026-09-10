@@ -18,11 +18,11 @@ interface KnowledgeBaseItem {
 }
 
 interface KbSelectorProps {
-  /** 可选知识库列表 */
+  /** 可选法条库列表 */
   knowledgeBases: KnowledgeBaseItem[]
-  /** 已选知识库 ID（按选中顺序，首个作为后端主库 kb_ids[0]，权重更高） */
+  /** 已选法条库 ID（按选中顺序，首个作为后端主库 kb_ids[0]，权重更高） */
   selectedKbIds: string[]
-  /** 切换某个知识库的选中状态（多选） */
+  /** 切换某个法条库的选中状态（多选） */
   onToggle: (kbId: string) => void
 }
 
@@ -30,19 +30,19 @@ interface KbSelectorProps {
 type KbGroupKey = 'mine' | 'org' | 'shared'
 
 const GROUP_LABELS: Record<KbGroupKey, string> = {
-  mine: '个人知识库',
+  mine: '个人法条库',
   org: '组织公共',
-  shared: '共享知识库',
+  shared: '共享法条库',
 }
 
-// 分组渲染顺序：个人 > 组织公共 > 共享给我（与知识库管理页关系档位一致）。
+// 分组渲染顺序：个人 > 组织公共 > 共享给我（与法条库管理页关系档位一致）。
 const GROUP_ORDER: KbGroupKey[] = ['mine', 'org', 'shared']
 
 /**
- * 知识库多选器：作为选择入口。未选时显示「知识库」文本；已选时隐藏文本，仅在数据库图标
- * 后显示一个圆形数字角标表示已选数量。选中的具体知识库由独立的 KbSelectionList 区域渲染。
+ * 法条库多选器：作为选择入口。未选时显示「法条库」文本；已选时隐藏文本，仅在数据库图标
+ * 后显示一个圆形数字角标表示已选数量。选中的具体法条库由独立的 KbSelectionList 区域渲染。
  *
- * 下拉内按库类型分组（个人 / 组织公共 / 共享给我），便于区分不同来源的知识库。
+ * 下拉内按库类型分组（个人 / 组织公共 / 共享给我），便于区分不同来源的法条库。
  */
 function KbSelector({ knowledgeBases, selectedKbIds, onToggle }: KbSelectorProps) {
   const { isOwner } = useAuth()
@@ -71,14 +71,14 @@ function KbSelector({ knowledgeBases, selectedKbIds, onToggle }: KbSelectorProps
               {count}
             </span>
           ) : (
-            <span>知识库</span>
+            <span>法条库</span>
           )}
           <ChevronDown className="h-3 w-3" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start">
         {knowledgeBases.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">暂无可用知识库</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">暂无可用法条库</div>
         ) : (
           grouped.map((group, idx) => (
             <div key={group.key}>

@@ -62,13 +62,13 @@ export interface PageResult<T> {
   has_more: boolean
 }
 
-// 知识库共享入参（user 多选 + 权限）
+// 法条库共享入参（user 多选 + 权限）
 export interface ShareRequest {
   user_ids: string[]
   permission: string
 }
 
-// 知识库列表查询参数（分页 + 关系筛选 + 排序 + 名称搜索）
+// 法条库列表查询参数（分页 + 关系筛选 + 排序 + 名称搜索）
 export interface KnowledgeBaseListParams {
   page?: number
   page_size?: number
@@ -77,7 +77,7 @@ export interface KnowledgeBaseListParams {
   q?: string
 }
 
-// 知识库容量进度条（与后端 KBCapacityVO 对齐，session-file-upload Req 7）
+// 法条库容量进度条（与后端 KBCapacityVO 对齐，session-file-upload Req 7）
 // 真实度量单位是 child chunk；文件数（approx_*_files）是辅助翻译，标"约"。
 export interface KBCapacity {
   used_chunks: number
@@ -89,7 +89,7 @@ export interface KBCapacity {
   approx_remaining_files: number
 }
 
-// 知识库相关接口
+// 法条库相关接口
 export const knowledgeBaseApi = {
   list: (params?: KnowledgeBaseListParams) => {
     const qs = new URLSearchParams()
@@ -138,7 +138,7 @@ export const knowledgeBaseApi = {
     ),
 }
 
-// 跨租户知识库分享链接（cross-tenant-kb-share）
+// 跨租户法条库分享链接（cross-tenant-kb-share）
 export interface ShareLinkInfo {
   kb_name: string
   owner_username: string | null
@@ -391,7 +391,7 @@ export const retrievalApi = {
 
 // API Key 相关接口
 // capability-config-to-platform：API Key 为平台能力出口（外部系统凭 Key + 自身用户标识
-// 在 External 租户内维护并查询自己的知识库），仅超级管理员签发/撤销。创建走代理 Key 端点
+// 在 External 租户内维护并查询自己的法条库），仅超级管理员签发/撤销。创建走代理 Key 端点
 // （external_agent，require_platform）。
 export const apiKeyApi = {
   list: () => request<{ items: unknown[]; total: number }>('/api-keys').then(res => res.items),
@@ -415,7 +415,7 @@ const tenantHeader = (tenantId?: string): RequestInit =>
   tenantId ? { headers: { 'X-Tenant-ID': tenantId } } : {}
 
 // 平台级配置（超管）：当前承载向量集合加载缓存 TTL + 单库/单会话 chunk 硬上限。
-// 注：全部知识库共用一个 Milvus collection（kb_id 作为 Partition Key），故加载缓存是全局粒度。
+// 注：全部法条库共用一个 Milvus collection（kb_id 作为 Partition Key），故加载缓存是全局粒度。
 export interface PlatformConfig {
   load_cache_ttl: number
   kb_chunk_cap: number

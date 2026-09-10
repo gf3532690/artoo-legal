@@ -117,7 +117,7 @@ export default function Register() {
                 id="tenant"
                 value={tenantName}
                 onChange={(e) => setTenantName(e.target.value)}
-                placeholder="如：我的知识库 / 组织名"
+                placeholder="如：我的法条库 / 组织名"
                 autoFocus
                 className="mt-2"
               />

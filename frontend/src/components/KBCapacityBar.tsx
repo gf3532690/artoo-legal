@@ -1,4 +1,4 @@
-// 知识库容量进度条（session-file-upload Task 17 / Req 7）。
+// 法条库容量进度条（session-file-upload Task 17 / Req 7）。
 //
 // 后端返回 `KBCapacityVO`：
 // - used_chunks（精确）/ total_chunks（平台 KB_Chunk_Cap）
@@ -41,7 +41,7 @@ function formatChunks(n: number): string {
 
 interface Props {
   capacity: KBCapacity
-  // compact=true 用于知识库列表卡片（极简，单行）；false 用于详情页头部（完整）
+  // compact=true 用于法条库列表卡片（极简，单行）；false 用于详情页头部（完整）
   compact?: boolean
   className?: string
 }
@@ -102,7 +102,7 @@ export default function KBCapacityBar({ capacity, compact = false, className }: 
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={pctDisplay}
-              aria-label={`知识库容量，已用 ${pctDisplay}%`}
+              aria-label={`法条库容量，已用 ${pctDisplay}%`}
             >
               <div
                 className={cn('h-full transition-all duration-300', fillCls)}

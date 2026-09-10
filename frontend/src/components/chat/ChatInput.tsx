@@ -147,7 +147,7 @@ function ChatInput({
           <TooltipContent side="top" className="max-w-xs">
             {canUploadSessionFile ? (
               <div className="space-y-0.5 text-xs leading-relaxed">
-                <div>上传文件到本会话（无需选择知识库）</div>
+                <div>上传文件到本会话（无需选择法条库）</div>
                 <div className="text-muted-foreground">支持类型：{UPLOAD_ACCEPT_LABEL}</div>
               </div>
             ) : (
@@ -167,7 +167,7 @@ function ChatInput({
     </>
   )
 
-  // 已选知识库 + 已上传文件列表（centered/底部两套布局共用）
+  // 已选法条库 + 已上传文件列表（centered/底部两套布局共用）
   const fileListSlot = (
     <>
       <KbSelectionList
@@ -198,7 +198,7 @@ function ChatInput({
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入问题，将基于知识库和网络搜索回答..."
+            placeholder="输入问题，将基于法条库和网络搜索回答..."
             className="w-full px-5 pt-5 pb-2 text-sm bg-transparent border-none outline-none resize-none placeholder:text-muted-foreground/60 min-h-[60px] max-h-[160px]"
             rows={2}
             disabled={isStreaming}

@@ -18,7 +18,7 @@ import TableSkeleton from '@/components/skeletons/TableSkeleton'
 import { AvatarPicker } from '@/components/AvatarPicker'
 import { toast } from 'sonner'
 
-// 用户管理页面（租户级，仅 admin）：建用户（固定 member）、启停、重置密码、转移知识库。
+// 用户管理页面（租户级，仅 admin）：建用户（固定 member）、启停、重置密码、转移法条库。
 // 固定角色模型下，租管创建的用户一律为 member；设立 admin 由超管经平台流程完成。
 function Users() {
   const queryClient = useQueryClient()
@@ -78,7 +78,7 @@ function Users() {
   const transferMutation = useMutation({
     mutationFn: () => adminApi.transferKnowledgeBases(transferUser!.id, transferTarget),
     onSuccess: (data) => {
-      toast.success(`已转移 ${data.transferred_count} 个知识库`)
+      toast.success(`已转移 ${data.transferred_count} 个法条库`)
       setTransferUser(null)
       setTransferTarget('')
     },
@@ -121,7 +121,7 @@ function Users() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold">用户管理</h2>
-          <p className="text-muted-foreground text-sm mt-1">在本空间内创建用户（普通成员）、启停、重置密码、转移知识库。新建用户首次登录需强制改密。</p>
+          <p className="text-muted-foreground text-sm mt-1">在本空间内创建用户（普通成员）、启停、重置密码、转移法条库。新建用户首次登录需强制改密。</p>
         </div>
         <Button onClick={() => setShowCreate(true)}>
           <Plus className="h-4 w-4" />
@@ -203,7 +203,7 @@ function Users() {
                           className="h-8 w-8"
                           onClick={() => { setTransferUser(u); setTransferTarget('') }}
                           disabled={u.is_active}
-                          title={u.is_active ? '请先停用该用户再转移知识库' : '转移知识库'}
+                          title={u.is_active ? '请先停用该用户再转移法条库' : '转移法条库'}
                         >
                           <ArrowRightLeft className="h-4 w-4" />
                         </Button>
@@ -307,13 +307,13 @@ function Users() {
         </DialogContent>
       </Dialog>
 
-      {/* 转移知识库 */}
+      {/* 转移法条库 */}
       <Dialog open={!!transferUser} onOpenChange={(o) => { if (!o) { setTransferUser(null); setTransferTarget('') } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>转移知识库 · {transferUser?.username}</DialogTitle>
+            <DialogTitle>转移法条库 · {transferUser?.username}</DialogTitle>
             <DialogDescription>
-              把该用户名下的全部知识库归属转移给同空间内另一启用用户（仅改归属，不搬数据，即时生效）。用户须先停用，转移即资产交接的最后一步。
+              把该用户名下的全部法条库归属转移给同空间内另一启用用户（仅改归属，不搬数据，即时生效）。用户须先停用，转移即资产交接的最后一步。
             </DialogDescription>
           </DialogHeader>
           <div className="mt-2">
