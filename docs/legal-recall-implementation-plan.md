@@ -171,7 +171,23 @@
 
 **下游（law-agent-lite-backend）承担「谁能看哪些库」的业务规则**：它用自己的用户权限与关联表算出应取哪些个人库，把 `kb_ids` 传进来。法条库不干涉这件事——Key 只是"能不能调这个接口"，调什么内容由参数决定。
 
-**Key 选型（已验证身份构造）**：调用方用**绑定默认租户的 `user_level` Key**（`apikey_auth.py` 中 `_auth_user_level` 取 `tenant_id=api_key.tenant_id` 并带绑定用户主体）。这样它能读到 `own_ids`（自己创建的个人库）∪ `public_ids`（全局库 `organization` + `read`）。**不使用 `external_agent` 通道**——它的 `tenant_id` 被硬锁在内置 `External_User_Tenant`，与"单租户"前提冲突。
+**Key 选型（两把路，均已实测）**：
+
+1. **代理 Key + `X-External-User-Id`（对齐 Artoo 原设计，推荐给多终端用户的调用方）**：
+   超管签发 `external_agent` Key，调用方每次请求带 `X-External-User-Id: <自有用户ID>`；
+   法条库按 `(代理Key, 外部用户ID)` 懒创建**独立外部用户身份**，该身份各自拥有私有个人库，
+   互相不可见。Artoo 原本把外部用户硬锁在内置 `tenant-external-builtin`——那样跨租户读不到
+   默认租户里的全局法条库（实测：列库返回 0、检索直接 `400`）。本 fork 因此新增配置
+   `EXTERNAL_USER_TENANT_ID`，默认指向**默认租户**，外部用户与全局库同租户，于是既能读全局库
+   又各自隔离；要退回上游形态把它设回 `tenant-external-builtin` 即可。
+   建库/归属/隔离不需要新代码：`owner_user_id` 取 `identity.acting_subject_id`，
+   外部用户天然落成 `external_users.id`（原设计已支持）。
+2. **用户级 Key（一把 Key = 一个身份）**：`apikey_auth.py::_auth_user_level` 取
+   `tenant_id=api_key.tenant_id` 并带绑定用户主体，能读 `own_ids` ∪ `public_ids`
+   （全局库 `organization` + `read`）。适合"一把 Key 代所有用户"、库↔用户映射全在下游的简单接法；
+   代价是**法条库内部不做终端用户隔离**，隔离完全靠下游。
+
+两种可并存：代理 Key 面向"要按终端用户隔离"的调用方，用户级 Key 面向"库范围由下游自算"的调用方。
 
 ### 4.2 检索链路
 
@@ -845,7 +861,7 @@ M0–M2 硬串行，M3–M5 可并行。
 | 18 | 法律修订由人工删除 + 上传更新，不做自动替换 |
 | 19 | 评测集本期不做（已确认延后） |
 | 20 | 法条库为**单租户**部署；默认租户管理员维护全局库；Super_Admin 只做平台装配、不参与内容 |
-| 21 | 调用方使用绑定默认租户的 `user_level` Key，不使用 `external_agent` 通道 |
+| 21 | 调用方可用 `user_level` Key（一把 Key = 一个身份），**也可用 `external_agent` 代理 Key + `X-External-User-Id`**（每终端用户一个外部身份，见 §15.7）；后者需把 `EXTERNAL_USER_TENANT_ID` 指向默认租户（本 fork 默认值） |
 | 22 | 抽取结果**全量核对**（输出法名 + 条号数清单逐份核对），不设百分比验收目标 |
 | 23 | 砍掉 `paragraph_index` / `item_index`（款号 / 项号）两字段 |
 | 24 | 关闭 OCR 与 ASR（配置层，不删模块）；原因不只是"用不上"，而是 OCR 会把图片识别结果插进法条正文造成污染 |
@@ -999,3 +1015,36 @@ M0–M2 硬串行，M3–M5 可并行。
 没有该用户的个人库时，先 `POST /api/knowledge-bases` 建库，再取 `GET /api/knowledge-bases/{kb_id}/documents`
 （首次必然为空列表）。若希望改为**服务端在列库时按约定自动建**，需要先定一个「下游用户标识 → 库」的
 命名/标记约定，本轮未做。
+
+### 15.7 外部用户（代理 Key + `X-External-User-Id`）对齐（2026-09-11）
+
+**背景**：Artoo 原设计里，第三方用「超管级代理 Key + `X-External-User-Id`」接入，平台按
+`(代理Key, 外部用户ID)` 懒创建外部用户身份——每个终端用户一个身份、各自拥有私有库，
+隔离由法条库本身保证。但原实现把外部用户硬锁在内置 `tenant-external-builtin`，
+而单租户法条库的全局库在 `tenant-legal-default`，跨租户读一律 404。实测（改造前）：
+
+| 用代理 Key 调用 | 改造前 |
+|---|---|
+| `GET /api/knowledge-bases` | 200 但 `total=0`（看不到全局库） |
+| `POST /api/retrieval/search`（不传 kb_ids） | **400**「未找到全局法条库…」（租户内解析不到全局库） |
+| 显式传全局库 `kb_id` | **404 资源不存在**（跨租户硬隔离） |
+
+**处置**：新增配置 `EXTERNAL_USER_TENANT_ID`（默认 = 默认租户；上游形态设回
+`tenant-external-builtin`），代理 Key 的 `tenant_id`、外部用户行的 `tenant_id`、
+外部身份上下文的 `tenant_id` 三处统一取它；与配置相同时引导不再另建内置外部租户。
+建库/归属/隔离链路**零改动**——`owner_user_id` 本就取 `identity.acting_subject_id`。
+
+**改造后实测**（同一把代理 Key，两个外部用户 ID）：
+
+| 调用 | `alice-001` | `bob-002` |
+|---|---|---|
+| `GET /api/knowledge-bases` | 全局法条库 | 全局法条库（看不到 alice 的个人库） |
+| `POST /api/knowledge-bases` | 201，`tenant=tenant-legal-default`、`owner_user_id=<external_users.id>` | — |
+| 上传 + 入库 | completed（12 子块） | — |
+| 检索 `kb_ids=[alice 的个人库]` | `source=personal` 命中《烟叶税法》第三/五/九条 | **404 资源不存在** |
+| 检索（不传 kb_ids） | 200，全局库 | 200，全局库《国籍法》第四条 |
+| 检索「纳税」（top_k=8） | **global 4 + personal 4**（一次响应内两库合并） | — |
+
+**结论**：两种接入方式并存——要"每终端用户一个隔离身份"用代理 Key + `X-External-User-Id`；
+要"一把 Key 代所有用户、库范围全由下游算"用用户级 Key。前者是本轮新增能力，
+不影响后者已有行为。

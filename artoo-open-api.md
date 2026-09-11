@@ -22,7 +22,7 @@
 | 3 | **不再支持 `session_id`** | 会话附件链路随非召回链路一并移除；相关章节标为「本部署未启用」 |
 | 4 | **结果 `metadata` 追加法条字段** | `law_name`、`article_number`、`article_label`、`chapter`、`source`（取值 `global` / `personal`） |
 | 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
-| 6 | **外部系统用「用户级 Key」，不用代理 Key** | 单租户部署下，调用方持有默认租户内某用户签发的 `user_level` Key：`Authorization: Bearer sk-...` 即可，**不需要** `X-External-User-Id`。1.2 / 1.3 / 第 2 节的代理 Key 通道是上游形态，本部署不采用（其租户被硬锁在内置「外部用户租户」）。详见 2.0 |
+| 6 | **代理 Key 的外部用户落在默认租户** | 1.2 / 1.3 的代理 Key 通道在本部署**可用**，但外部用户不再落在内置「外部用户租户」，而是落在默认租户（配置 `EXTERNAL_USER_TENANT_ID`），否则跨租户读不到全局法条库。另提供更适合单身份接入的「用户级 Key」。两种方式详见 2.0 |
 
 ---
 
@@ -146,10 +146,67 @@ await fetch(`${BASE}${path}`, {
 
 ## 2. 准备：签发代理 Key（一次性，管理员操作）
 
-### 2.0 本部署（法条库）：用用户级 Key（已实测）
+### 2.0 本部署（法条库）：两种接入方式（均已实测）
 
-单租户部署下**不使用代理 Key**：全局法条库与全部个人库都在同一个默认租户内，而代理 Key
-会把身份锁进内置的「外部用户租户」，读不到默认租户的全局库。调用方改用**用户级 Key**。
+单租户部署下全局法条库与全部个人库都在**同一个默认租户**内。调用方按「要不要按终端用户隔离」二选一：
+
+| 方式 | 适用 | 终端用户隔离 | 额外请求头 |
+|---|---|---|---|
+| **A. 代理 Key + `X-External-User-Id`** | 下游有自己的用户体系，希望每个终端用户一个身份 | **有**（各用户只看得见自己的私有库） | `X-External-User-Id` |
+| **B. 用户级 Key** | 一把 Key 代所有用户，库↔用户映射全在下游自算 | 无（法条库不区分终端用户） | 无 |
+
+> 方式 A 依赖配置 `EXTERNAL_USER_TENANT_ID` 指向默认租户（本 fork 默认值）。
+> 上游 Artoo 把它指向内置「外部用户租户」，那种配置下外部用户跨租户读不到全局法条库
+> （列库为空、检索报 400），**不要**在本部署里改回该值。
+
+#### A. 代理 Key + `X-External-User-Id`（推荐给多终端用户的调用方）
+
+```bash
+# 1. 超管登录（代理 Key 的签发属平台操作）
+curl -X POST $BASE/api/auth/login -H "Content-Type: application/json" \
+  -d '{"username":"root","password":"<超管口令>"}'
+
+# 2. 签发代理 Key（明文仅返回一次）
+curl -X POST $BASE/api/api-keys/external-agent \
+  -H "Authorization: Bearer <超管JWT>" -H "Content-Type: application/json" \
+  -d '{"name":"law-agent-lite 代理Key"}'
+# → { "key": "sk-...", "key_type": "external_agent" }
+
+KEY=sk-xxxxxxxx
+EUID=alice-001          # 你方系统内的终端用户唯一标识
+
+# 3. 列库：全局法条库 + 该外部用户自己的库
+curl "$BASE/api/knowledge-bases?page=1&page_size=50" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID"
+
+# 4. 建该用户的个人库（首次为空）
+curl -X POST "$BASE/api/knowledge-bases" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID" \
+  -H "Content-Type: application/json" -d '{"name":"个人库-alice"}'
+
+# 5. 上传 / 列文档 / 删文档（内容维护，同第 4、7 节）
+curl -X POST "$BASE/api/knowledge-bases/<kb_id>/documents/upload" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID" -F "file=@某部法律.docx"
+curl "$BASE/api/knowledge-bases/<kb_id>/documents?page=1&page_size=20" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID"
+curl -X DELETE "$BASE/api/documents/<doc_id>" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID"
+
+# 6. 检索：全局法条库自动带上，个人库由 kb_ids 传入
+curl -X POST "$BASE/api/retrieval/search" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EUID" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"烟叶税的计税依据","kb_ids":["<kb_id>"],"top_k":5}'
+```
+
+实测要点：
+
+- 不同 `X-External-User-Id` **互相看不到对方的个人库**；拿对方的 `kb_id` 检索是 **404**。
+- 同一把 Key 建的库 `owner` 就是该外部身份，所以同一把 Key 既能维护也能检索这些库。
+- 不带 `kb_ids` 时只检索全局法条库（默认并入），不会 400；`top_k` 默认 5。
+- 外部用户不会出现在「用户管理」列表里（它们是 `external_users`，不是注册用户）。
+
+#### B. 用户级 Key（一把 Key = 一个身份）
 
 **一次性准备**（由默认租户里的账号，在法条库后台 `/api-keys` 页面或调接口完成）：
 

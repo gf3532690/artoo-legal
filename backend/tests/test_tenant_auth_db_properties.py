@@ -93,7 +93,11 @@ def test_property_10_repository_tenant_filter(kbs, viewer_tenant):
 )
 def test_property_7_external_user_namespace(pairs):
     from app.auth.apikey_auth import ApiKeyAuthenticator
-    from app.auth.constants import EXTERNAL_USER_TENANT_ID
+    from app.config import get_settings
+
+    # 外部用户落在哪个租户由配置决定：上游 Artoo 是内置 External_User_Tenant，
+    # 本 fork（单租户法条库）默认是默认租户——断言必须跟着配置走，不能钉死常量。
+    ext_tid = get_settings().external_user_tenant_id
 
     async def run():
         engine = _new_engine()
@@ -101,7 +105,7 @@ def test_property_7_external_user_namespace(pairs):
         async with engine.begin() as c:
             await c.run_sync(Base.metadata.create_all)
         async with sm() as s:
-            s.add(Tenant(id=EXTERNAL_USER_TENANT_ID, name="ext", tenant_type="external", is_active=True))
+            s.add(Tenant(id=ext_tid, name="ext", tenant_type="external", is_active=True))
             await s.commit()
 
         resolved: dict[tuple[str, str], str] = {}
@@ -114,7 +118,7 @@ def test_property_7_external_user_namespace(pairs):
                     assert eu.id == resolved[(key_source, euid)]
                 else:
                     resolved[(key_source, euid)] = eu.id
-                assert eu.tenant_id == EXTERNAL_USER_TENANT_ID
+                assert eu.tenant_id == ext_tid
 
         # 不同 source 同 euid -> 不同记录
         async with sm() as s:

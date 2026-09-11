@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import hash_key
+from app.config import get_settings
 from app.api.errors import (
     MissingExternalUserIdError,
     TenantDisabledError,
@@ -26,7 +27,6 @@ from app.api.errors import (
     UserDisabledError,
 )
 from app.auth.constants import (
-    EXTERNAL_USER_TENANT_ID,
     HEADER_EXTERNAL_USER_ID,
     ApiKeyTypeEnum,
     TenantRoleEnum,
@@ -192,10 +192,13 @@ class ApiKeyAuthenticator:
         )
         external_user_pk = external_user.id
 
+        # 外部用户落在哪个租户由 ``settings.external_user_tenant_id`` 决定：
+        # 上游 Artoo 是内置 External_User_Tenant；本 fork（单租户法条库）默认是
+        # 默认租户——否则跨租户硬隔离会让外部用户读不到全局法条库（检索报 400）。
         return IdentityContext(
             source=IdentitySourceEnum.API_KEY,
             op_level=OperationLevelEnum.TENANT,
-            tenant_id=EXTERNAL_USER_TENANT_ID,  # 硬锁定，忽略任何目标租户入口
+            tenant_id=get_settings().external_user_tenant_id,  # 忽略任何目标租户入口
             external_user_id=external_user_pk,
             api_key_id=api_key_id,
             role=TenantRoleEnum.MEMBER,  # 外部用户固定为 member
@@ -219,7 +222,7 @@ class ApiKeyAuthenticator:
 
         new_eu = ExternalUser(
             id=str(uuid.uuid4()),
-            tenant_id=EXTERNAL_USER_TENANT_ID,
+            tenant_id=get_settings().external_user_tenant_id,
             key_source=key_source,
             external_user_id=external_user_id,
         )

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/architecture/2026-09-11-external-users-in-default-tenant.md .agents/notes/implemented/architecture/2026-09-11-external-users-in-default-tenant.zh.md
+2026-09-11-external-users-in-default-tenant.md: 577a07652e68aaad447ae973b4753093a858d5ca
+2026-09-11-external-users-in-default-tenant.zh.md: 81313b648e470bc35769667ac8f290327a8a2db0

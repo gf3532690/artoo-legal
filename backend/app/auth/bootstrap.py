@@ -45,7 +45,14 @@ async def _tenant_bootstrap(session: AsyncSession) -> None:
     member；该租户的治理由平台 Super_Admin 经管理端点完成（按需补充管理员），
     故引导阶段**不再创建默认管理员**。每个外部用户按 (代理Key, X-External-User-Id)
     懒创建独立身份，各自在自有私有库内读写；不再预置无主公共库。
+
+    法条库 fork：外部用户默认落在**默认租户**（``settings.external_user_tenant_id``），
+    此时不再需要这个内置租户，跳过创建（否则租户管理列表里会多一个空租户）。
+    要退回上游形态，把 ``EXTERNAL_USER_TENANT_ID`` 配回 ``tenant-external-builtin``。
     """
+    if get_settings().external_user_tenant_id != EXTERNAL_USER_TENANT_ID:
+        return
+
     # 内置 External_User_Tenant
     ext_tenant = await session.get(Tenant, EXTERNAL_USER_TENANT_ID)
     if ext_tenant is None:

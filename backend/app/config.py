@@ -4,6 +4,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+from app.auth.constants import DEFAULT_LEGAL_TENANT_ID
+
 
 class Settings(BaseSettings):
     # 服务
@@ -215,6 +217,18 @@ class Settings(BaseSettings):
     legal_tenant_admin_username: str = ""
     legal_tenant_admin_password: str = ""
     legal_tenant_name: str = "法条库"
+
+    # 外部用户（Artoo 原「代理 Key + X-External-User-Id」通道）落在哪个租户。
+    #
+    # 上游 Artoo 默认是内置的 ``tenant-external-builtin``（多租户形态：第三方用户
+    # 自成一体，与平台业务租户互不可见）。本部署是**单租户**法条库：全局法条库在
+    # ``tenant-legal-default`` 内，而 KB 读授权有跨租户硬隔离（跨租户一律 404），
+    # 所以外部用户若仍落在内置外部租户，就**读不到全局法条库**（检索会因范围为空报 400）。
+    # 因此本 fork 默认把外部用户直接落在默认租户：外部用户仍按
+    # (代理Key, X-External-User-Id) 各自懒创建独立身份、各自拥有私有个人库，
+    # 同时作为同租户成员可读全局法条库。
+    # 需要退回上游形态时把本项设回 ``tenant-external-builtin`` 即可。
+    external_user_tenant_id: str = DEFAULT_LEGAL_TENANT_ID
 
     # 注册模式（env 可配置）：
     #   invite_only（默认）—— 关闭自助注册：登录页无注册入口，/api/auth/register 返回 403；

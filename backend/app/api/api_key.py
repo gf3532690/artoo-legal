@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import generate_api_key, get_key_prefix, hash_key
+from app.config import get_settings
 from app.auth.signing import derive_signing_secret
 from app.api.deps import (
     get_db_session,
@@ -28,7 +29,6 @@ from app.api.errors import CrossTenantError, PermissionDeniedError
 from app.auth.audit import add_audit
 from app.auth.constants import (
     AuditActionEnum,
-    EXTERNAL_USER_TENANT_ID,
     ApiKeyTypeEnum,
     KbVisibilityEnum,
 )
@@ -244,7 +244,11 @@ async def create_proxy_key(
     identity: IdentityContext = Depends(require_platform()),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """签发超管级代理 Key（仅 Super_Admin）。tenant 锁定 External_User_Tenant。"""
+    """签发超管级代理 Key（仅 Super_Admin）。
+
+    tenant 锁到 ``settings.external_user_tenant_id``：本 fork（单租户法条库）默认是
+    默认租户，上游 Artoo 是内置的 External_User_Tenant（见 config 同名注释）。
+    """
     raw_key = generate_api_key()
     key_id = str(uuid.uuid4())
     api_key = ApiKey(
@@ -254,7 +258,7 @@ async def create_proxy_key(
         name=body.name,
         is_active=True,
         call_count=0,
-        tenant_id=EXTERNAL_USER_TENANT_ID,
+        tenant_id=get_settings().external_user_tenant_id,
         key_type=ApiKeyTypeEnum.EXTERNAL_AGENT.value,
         key_source=key_id,  # 命名空间前缀 = 自身 id
     )
