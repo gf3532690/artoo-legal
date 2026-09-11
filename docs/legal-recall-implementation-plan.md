@@ -1048,3 +1048,41 @@ M0–M2 硬串行，M3–M5 可并行。
 **结论**：两种接入方式并存——要"每终端用户一个隔离身份"用代理 Key + `X-External-User-Id`；
 要"一把 Key 代所有用户、库范围全由下游算"用用户级 Key。前者是本轮新增能力，
 不影响后者已有行为。
+
+### 15.8 与下游 law-agent-lite-backend 的对接现状（读其源码所得）
+
+下游 `law-agent-lite-backend`（Java/Spring Boot）已有专门的 `modules/artoo` 集成包，
+它的调用方式与本部署**天然契合**，但有几处必须注意的差异。
+
+**它实际怎么调**（源码位置：`src/main/java/.../modules/artoo/`）：
+
+| 维度 | 实现 |
+|---|---|
+| 凭据 | `ArtooProperties.apiKey` = **超管级代理 Key**；每次请求 `ArtooClient` 自动注入 `Authorization: Bearer <key>` **+ `X-External-User-Id`**（`ArtooClient.java` 的 `headers.setBearerAuth(...)` / `headers.set("X-External-User-Id", eu)`）；另配了 AK/SK 签名通道（access/secret key） |
+| 外部身份 | 普通请求 = 当前登录用户 ID；**案件库 = 派生身份 `case-{创建人ID}`**（`CaseKbOwner`），这样案件库天然不出现在用户自己的库列表里，也改不动 |
+| 库范围 | 下游用**自有映射表 `sys_kb_info` + 案件三档数据范围**先过滤 `kb_ids`，无权限直接 403（`KbAccessService.filterReadable` / `requireRead`）——正是 D4 说的"库范围由下游算" |
+| 召回 | `POST /api/retrieval/search` **原样透传**（`ArtooRetrievalController`），另封装了 `/api/retrieval/search/by-case`（按案件解析 kb_id） |
+| 知识库/文档 | 列表/建库/改名/删库、文件夹、上传、重试、删除、批量删/重试、分块、原件 raw/preview |
+| 会话与对话 | `/api/sessions*`、会话附件、文件事件 WebSocket、SSE 对话（chat 栈） |
+
+**对本部署的意义**：它的鉴权模型**就是** 15.7 打通的那条路。改造前把它的 `artoo.base-url`
+指到法条库，结果会是"列库为空 + 召回 400"；改造后可直接复用，不需要改它的客户端。
+
+**指过来之前必须知道的 4 件事**：
+
+1. **`session_id` 会被拒**：法条库对显式 `session_id` 返回 400（会话链路已删）。下游目前把
+   `session_id` 原样透传，因此**聊天/附件链路必须继续指向上游 Artoo**，只有知识库与召回指到法条库。
+2. **会话相关端点不存在**：`/api/sessions*`、`/api/sessions/{id}/files/events`（WS）、SSE 对话在
+   法条库都 404（D7）。下游若只用法条库，这些功能要在路由层摘掉。
+3. **`top_k` 默认值 10 → 5**：下游文档写的是 10，本部署是 5。调用方不显式传 `top_k` 时条数会变少；
+   想保持 10 就在请求里显式传。
+4. **代理 Key 不能随手轮换（实测）**：外部身份的命名空间 = `(代理Key.id, X-External-User-Id)`，
+   换一把 Key，同一个 eu 会解析出一个**全新身份**，旧个人库立刻 `404`（数据还在，只是归属旧身份）。
+   实测：旧 Key + `alice-001` 可见 2 个库，新 Key + `alice-001` 只剩全局库，读旧个人库 404；
+   库里同一个 `alice-001` 对应 3 条 `external_users`（3 把 Key）。
+   → 约定：法条库这一侧的代理 Key 按**长期资产**管理；确需更换时要配套迁移（把旧外部身份名下的库
+   owner 改到新身份，或重建库）。
+
+**顺带一条下游体验项**：全局法条库不在下游 `sys_kb_info` 里，其列表按自有真值表算，所以下游用户
+天然看不到、也管不了全局库（这正是我们要的）。若下游要显式展示"全局法条库"这一项，需要把它作为
+只读公共库登记进 `sys_kb_info`，否则保持现状（召回时法条库会自动并入，不需要它登记）。
