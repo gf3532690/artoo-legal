@@ -5,6 +5,7 @@ import KnowledgeBase from './pages/KnowledgeBase'
 import Documents from './pages/Documents'
 import KnowledgeGraph from './pages/KnowledgeGraph'
 import LegalLibrary from './pages/LegalLibrary'
+import Home from './pages/Home'
 import Retrieval from './pages/Retrieval'
 import ApiKeys from './pages/ApiKeys'
 import Models from './pages/Models'
@@ -36,11 +37,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-// 登录后默认落地页：超管为纯平台管理身份（不参与法条库内容），落到"租户管理"；
-// 租户管理员落到全局法条库的内容维护页。
+// 登录后默认落地页：统一落到首页（概览），由首页按身份给出可见入口。
+// 不再直接跳进「全局法条库」——那是维护动作，登录后第一件事通常不是改语料。
 function DefaultLanding() {
-  const { isSuperAdmin } = useAuth()
-  return <Navigate to={isSuperAdmin ? '/tenants' : '/legal'} replace />
+  return <Navigate to="/home" replace />
 }
 
 // 根路径入口：未登录展示炫酷落地页；已登录则按身份跳转到对应首页。
@@ -61,8 +61,6 @@ function App() {
       <Route path="/register" element={<Register />} />
       <Route path="/change-password" element={<ChangePassword />} />
       <Route path="/invite/:token" element={<InviteAccept />} />
-      {/* 法条库部署：入口直达全局法条库的内容维护页（不新增检索端点）。 */}
-      <Route path="/legal" element={<LegalLibrary />} />
       <Route
         element={
           <RequireAuth>
@@ -70,6 +68,11 @@ function App() {
           </RequireAuth>
         }
       >
+        {/* 登录后的默认落地页：概览 + 按身份可见的入口 */}
+        <Route path="home" element={<Home />} />
+        {/* 法条库部署：入口直达全局法条库的内容维护页（不新增检索端点）。
+            必须挂在 Layout 下：放在顶层时这个页面没有左侧菜单，用户进去就出不来了。 */}
+        <Route path="legal" element={<LegalLibrary />} />
         <Route path="knowledge-bases" element={<KnowledgeBase />} />
         <Route path="knowledge-bases/:id" element={<Documents />} />
         <Route path="knowledge-bases/:id/graph" element={<KnowledgeGraph />} />
