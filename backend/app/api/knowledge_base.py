@@ -266,6 +266,42 @@ def _ensure_kb_owner(identity: IdentityContext, kb: KnowledgeBase) -> None:
         raise PermissionDeniedError("仅知识库创建人可执行该操作")
 
 
+def _ensure_not_default_legal_kb(kb: KnowledgeBase, action: str) -> None:
+    """全局法条库的保护闸门：禁止删除。
+
+    它不是普通用户知识库，而是本部署的权威法条底座——检索时会被**默认并入**
+    每一个请求。删掉它等于让召回链路失效，而且**owner 闸门拦不住**：
+    默认库的 owner 就是租户管理员本人，他删自己的库是允许的。
+    因此这里必须显式拒绝（见方案 Phase 3 的「保护规则」）。
+    """
+    from app.retrieval.legal_scope import _is_default_legal_kb
+
+    if _is_default_legal_kb(kb.config):
+        raise PermissionDeniedError(
+            f"全局法条库不允许{action}：它是检索时默认并入的权威法条底座"
+        )
+
+
+def _ensure_default_legal_kb_chunker_unchanged(
+    kb: KnowledgeBase, new_config: dict | None
+) -> None:
+    """全局法条库的 `chunker_type` 禁止修改。
+
+    法条结构化入库完全依赖 `chunker_type=laws`；改掉它会让后续上传的文档
+    不再按「第X条」切分，而库里已有数据仍是旧切分——新旧混在一起且无从区分。
+    """
+    from app.retrieval.legal_scope import _is_default_legal_kb
+
+    if not _is_default_legal_kb(kb.config):
+        return
+    old = (kb.config or {}).get("chunker_type")
+    new = new_config.get("chunker_type") if isinstance(new_config, dict) else None
+    if new != old:
+        raise PermissionDeniedError(
+            "全局法条库不允许修改 chunker_type：法条结构化入库依赖它"
+        )
+
+
 async def _load_grants(db: AsyncSession, kb_id: str) -> list[GrantView]:
     rows = await db.execute(
         select(
@@ -649,6 +685,8 @@ async def update_knowledge_base(
     if kb is None:
         raise CrossTenantError()
     _ensure_kb_owner(identity, kb)  # 改名/改配置属实体操作：owner 专属
+    # 全局法条库的切分器不允许改（改了后续入库不再按法条切分）
+    _ensure_default_legal_kb_chunker_unchanged(kb, body.config)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(kb, field, value)
     kb.updated_at = datetime.now(timezone.utc)
@@ -670,6 +708,8 @@ async def delete_knowledge_base(
     if kb is None:
         raise CrossTenantError()
     _ensure_kb_owner(identity, kb)  # 删库属实体操作：owner 专属
+    # 全局法条库禁止删除（检索默认并入它；owner 闸门拦不住管理员删自己的库）
+    _ensure_not_default_legal_kb(kb, "删除")
 
     doc_result = await db.execute(
         select(Document.id, Document.file_type).where(Document.kb_id == kb_id)

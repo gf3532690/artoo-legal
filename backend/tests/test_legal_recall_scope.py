@@ -17,6 +17,10 @@ _os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production")
 
 from app.pipeline.legal_metadata import strip_content_prefix
 from app.retrieval.legal_scope import _is_default_legal_kb
+from app.api.knowledge_base import (
+    _ensure_default_legal_kb_chunker_unchanged,
+    _ensure_not_default_legal_kb,
+)
 
 
 class TestDefaultLegalKbFlag:
@@ -58,3 +62,52 @@ class TestStripContentPrefix:
 
     def test_empty_input(self) -> None:
         assert strip_content_prefix("") == ""
+
+
+class _FakeKb:
+    """仅承载 config 的知识库替身：保护闸门只读这一个属性。"""
+
+    def __init__(self, config: object) -> None:
+        self.config = config
+
+
+class TestDefaultLegalKbProtection:
+    """全局法条库的保护闸门（方案 Phase 3「保护规则」）。"""
+
+    def test_delete_is_rejected(self) -> None:
+        kb = _FakeKb({"chunker_type": "laws", "is_default_legal_kb": True})
+        try:
+            _ensure_not_default_legal_kb(kb, "删除")
+        except Exception as e:  # PermissionDeniedError
+            assert "全局法条库" in str(e)
+            return
+        raise AssertionError("删除全局法条库应当被拒绝")
+
+    def test_delete_is_allowed_for_ordinary_kb(self) -> None:
+        # 普通知识库不受影响
+        _ensure_not_default_legal_kb(_FakeKb({"chunker_type": "laws"}), "删除")
+        _ensure_not_default_legal_kb(_FakeKb(None), "删除")
+
+    def test_chunker_type_change_is_rejected(self) -> None:
+        kb = _FakeKb({"chunker_type": "laws", "is_default_legal_kb": True})
+        try:
+            _ensure_default_legal_kb_chunker_unchanged(kb, {"chunker_type": "naive"})
+        except Exception as e:
+            assert "chunker_type" in str(e)
+            return
+        raise AssertionError("修改全局法条库的 chunker_type 应当被拒绝")
+
+    def test_omitting_chunker_type_is_also_a_change(self) -> None:
+        kb = _FakeKb({"chunker_type": "laws", "is_default_legal_kb": True})
+        try:
+            _ensure_default_legal_kb_chunker_unchanged(kb, {"other": 1})
+        except Exception:
+            return
+        raise AssertionError("丢掉 chunker_type 也应视为修改")
+
+    def test_keeping_chunker_type_and_other_kb_are_allowed(self) -> None:
+        kb = _FakeKb({"chunker_type": "laws", "is_default_legal_kb": True})
+        _ensure_default_legal_kb_chunker_unchanged(kb, {"chunker_type": "laws"})
+        _ensure_default_legal_kb_chunker_unchanged(
+            _FakeKb({"chunker_type": "naive"}), {"chunker_type": "naive"}
+        )

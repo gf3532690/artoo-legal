@@ -5,16 +5,12 @@ import {
   Search,
   Key,
   Settings,
-  Cpu,
-  ScanText,
-  AudioLines,
   Layers,
   PanelLeft,
   LogOut,
   KeyRound,
   Building2,
   Users as UsersIcon,
-  Mail,
   ScrollText,
   ChevronUp,
   UserCircle,
@@ -39,14 +35,10 @@ const navItems = [
   // 管理员只需要维护全局法条库。
   { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
   { to: '/retrieval', label: '检索测试', icon: Search, group: 'capability' },
-  { to: '/models', label: '模型管理', icon: Cpu, group: 'capability' },
   { to: '/embed-config', label: 'Embedding', icon: Layers, group: 'capability' },
-  { to: '/ocr-services', label: 'OCR 服务', icon: ScanText, group: 'capability' },
-  { to: '/asr-services', label: 'ASR 服务', icon: AudioLines, group: 'capability' },
   { to: '/api-keys', label: 'API Key', icon: Key, group: 'capability' },
   { to: '/tenants', label: '租户管理', icon: Building2, group: 'platform' },
   { to: '/users', label: '用户管理', icon: UsersIcon, group: 'manage' },
-  { to: '/invitations', label: '邀请链接', icon: Mail, group: 'manage' },
   { to: '/audit-logs', label: '审计日志', icon: ScrollText, group: 'manage' },
 ] as const
 
@@ -80,10 +72,7 @@ function Layout() {
   const SUPER_ADMIN_MENUS = new Set([
     '/tenants',
     '/audit-logs',
-    '/models',
     '/embed-config',
-    '/ocr-services',
-    '/asr-services',
     '/retrieval',
     '/api-keys',
   ])
@@ -106,10 +95,7 @@ function Layout() {
     '/tenants',
     '/audit-logs',
     '/change-password',
-    '/models',
     '/embed-config',
-    '/ocr-services',
-    '/asr-services',
     '/retrieval',
     '/api-keys',
   ])

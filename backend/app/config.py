@@ -117,7 +117,11 @@ class Settings(BaseSettings):
     retrieval_cache_ttl: int = 1800  # 缓存 TTL（秒），默认 30 分钟
 
     # OCR 配置
-    ocr_enabled: bool = True
+    # 本产品线默认**关闭**（上游默认开启）。原因不只是"用不上"：现有 pipeline 会把
+    # 嵌入图片的 OCR 结果**按页位置插进正文**，而语料里仅有的 5 份含图文档
+    # （国徽法 / 国歌法 / 国旗法 / 香港基本法 / 澳门基本法）图片都是国家象征，
+    # 识别结果会污染法条正文。见方案 D15。
+    ocr_enabled: bool = False
     ocr_provider: str = "external_api"
     ocr_fallback_provider: str = ""
 
@@ -127,7 +131,8 @@ class Settings(BaseSettings):
     ocr_external_api_timeout: float = 30.0
 
     # ASR（语音识别）配置
-    asr_enabled: bool = True
+    # 本产品线默认**关闭**（上游默认开启）：语料是 `.doc` / `.docx`，没有音频。
+    asr_enabled: bool = False
     asr_api_url: str = ""
     asr_api_key: str = ""
     asr_model_name: str = ""
@@ -246,6 +251,9 @@ class Settings(BaseSettings):
     # ============================================================
     # 全局总开关：不为 true 则整体关闭图谱功能（不连 Neo4j、不抽取、API 返回明确不可用），
     # 主链路零额外成本（Req 9.3）。映射 env GRAPH_ENABLE。
+    #
+    # 本产品线（法条库）**不做知识图谱**：图谱代码按「配置关闭、模块保留」的策略
+    # 留在仓库里（见方案 D7），因此这个开关必须保持 false，不要在任何环境开启。
     graph_enable: bool = False
     # Neo4j 连接配置（仅 graph_enable=true 时使用）
     neo4j_uri: str = "bolt://neo4j:7687"
