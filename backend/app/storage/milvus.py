@@ -486,7 +486,7 @@ class MilvusClient:
         self, ef_construction: int | None = None, m: int | None = None,
         dim: int | None = None,
     ) -> None:
-        """幂等确保当前维度的**两张**物理表都存在（启动期调用）。
+        """幂等确保当前维度的**正式库物理表**存在（启动期调用）。
 
         Args:
             ef_construction: HNSW 建索引 efConstruction。None 时回落默认 200。
@@ -494,10 +494,13 @@ class MilvusClient:
             dim: 目标维度。None 时用客户端默认（``settings.embed_dim``）。
         """
         d = dim if dim is not None else self._dim
-        for base in (self._collection, self._session_collection):
-            await asyncio.to_thread(
-                self._ensure_collection_sync, collection_name(base, d), ef_construction, m, d,
-            )
+        # 会话附件链路已随非召回链路删除（见方案 D7 / §6.3），因此**不再创建会话表**，
+        # 避免留下永不被写入的空 collection。会话相关的读写方法仍保留在客户端里，
+        # 但它们已无调用方。
+        await asyncio.to_thread(
+            self._ensure_collection_sync, collection_name(self._collection, d),
+            ef_construction, m, d,
+        )
 
     async def ensure_collection(
         self, kb_id: str, ef_construction: int | None = None, m: int | None = None,

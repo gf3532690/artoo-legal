@@ -468,10 +468,11 @@
 | `law_name` | str \| None | 法律全名（首行至**日期行之前**拼接，见 D13；不能简单取首行） |
 | `article_number` | int \| None | 条号；无条文结构文档为 `None` |
 | `article_label` | str \| None | 原文条号（如「第一百四十六条」） |
-| `chapter` / `section` | str \| None | 章节，直接取现有 `section_path` |
+| `referenced_articles` | list[str] | 该 chunk 正文里出现的「第X条」引用；无条号的修正案 / 决定类文档用它构造 BM25 前缀（见 D11） |
+| `chapter` | str \| None | 章节，取自 `section_path` 清洗后用 `" / "` 拼接（见 D14） |
 | `issuing_authority` | str \| None | 发布机关（从正文括注解析） |
 | `publish_date` | str \| None | 通过 / 发布日期（从正文括注解析） |
-| `has_toc` | bool | 该文档是否含目录（供排查） |
+| `has_toc` | bool | **本次入库是否剥离了目录区**（标记驱动，见 D10；供排查） |
 | `extraction_method` | str | rule / manual |
 | `confidence` | float | 抽取置信度 |
 
@@ -555,7 +556,7 @@
 | 层 | 变化 |
 |----|------|
 | 路径 | 不变 |
-| 请求模型 | 不变（`kb_ids` 传个人库；`knowledge_base_id` / `session_id` 能力随 D7 调整） |
+| 请求模型 | 字段本身不变；`kb_ids` 传个人库，`session_id` 已移除（显式传入返回 `400`，见 D7） |
 | 认证 | 不变（沿用现有 Key 通道） |
 | 错误模型 | 不变 |
 | 响应信封 | 不变 |

@@ -592,11 +592,20 @@ async def create_knowledge_base(
     org_permission = OrgPermissionEnum.READ.value
     if visibility == KbVisibilityEnum.ORGANIZATION.value and body.org_permission is not None:
         org_permission = validate_org_permission(body.org_permission)
+
+    # 法条库部署：本部署里**所有**知识库都是法条库（1 个全局库 + N 个个人库）。
+    # 全局库在引导时已带上 chunker_type=laws；个人库由下游经本端点创建，
+    # 若调用方没显式指定，这里补上默认值——否则 config 缺省会走 ChunkerRouter
+    # 自动路由到 naive，上传的法条不会被「第X条」切分，个人库就退化成普通文本库。
+    # 见方案 D3。
+    kb_config = dict(body.config or {})
+    kb_config.setdefault("chunker_type", "laws")
+
     kb = KnowledgeBase(
         id=str(uuid.uuid4()),
         name=body.name,
         description=body.description,
-        config=body.config,
+        config=kb_config,
         doc_count=0,
         tenant_id=identity.tenant_id,
         owner_user_id=identity.acting_subject_id,
