@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/process/2026-09-11-require-legal-tenant-admin-in-install-check.md .agents/notes/implemented/process/2026-09-11-require-legal-tenant-admin-in-install-check.zh.md
+2026-09-11-require-legal-tenant-admin-in-install-check.md: 0feb453b6a027c63b07ceefcdd4ef88d22cdd01f
+2026-09-11-require-legal-tenant-admin-in-install-check.zh.md: a61d696ca4a8dd7174c7055bde59cb16dbb31d00

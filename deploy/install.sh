@@ -109,6 +109,15 @@ check_env() {
   if [[ -z "$(_get_env_val SUPER_ADMIN_PASSWORD)" ]]; then
     MISSING+=("SUPER_ADMIN_PASSWORD（初始超管密码，如 Admin@123456）")
   fi
+  # 法条库部署：这两项决定「全局法条库的 owner 是谁」。缺了不会报错但会静默降级——
+  # 租户建出来、owner 为空，于是没有任何账号能维护全局法条库（上传/删除全 403）。
+  # 从上游 Artoo 的旧 .env 覆盖部署时最容易踩，所以必须 fail-fast。
+  if [[ -z "$(_get_env_val LEGAL_TENANT_ADMIN_USERNAME)" ]]; then
+    MISSING+=("LEGAL_TENANT_ADMIN_USERNAME（默认租户管理员用户名，全局法条库的 owner，如 lawadmin）")
+  fi
+  if [[ -z "$(_get_env_val LEGAL_TENANT_ADMIN_PASSWORD)" ]]; then
+    MISSING+=("LEGAL_TENANT_ADMIN_PASSWORD（默认租户管理员口令，首次登录强制改密）")
+  fi
 
   if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo ""
