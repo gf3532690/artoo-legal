@@ -98,6 +98,9 @@ The identity-namespace stability only holds for a given plaintext: issuing a
 *different* key value produces a different namespace and therefore a different
 set of external users, exactly as a hand-issued replacement would.
 
+The operator-facing statement of this lives in `deploy/DEPLOY.md` §4 (账号与
+API Key) and §6 (全局法条库与个人法条库), which ships inside the offline package.
+
 ## Verification
 
 Not run at runtime. The change was checked statically (`ast.parse` on the edited

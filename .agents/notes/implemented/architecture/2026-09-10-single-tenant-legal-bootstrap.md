@@ -67,6 +67,10 @@ and it is recorded in the plan's D4.
 The sidebar gains one admin-only entry, 法条库, replacing the upstream 知识库
 list entry. The plan's decision list still governs which entries exist.
 
+The operator-facing statement of the accounts, the global library, and its
+relation to the personal libraries downstream creates lives in
+`deploy/DEPLOY.md` §4 and §6 (shipped inside the offline package).
+
 ## Testing
 
 The bootstrap path is idempotent by construction (fixed tenant id; library
