@@ -969,3 +969,33 @@ M0–M2 硬串行，M3–M5 可并行。
 
 **本地测试脚手架（不入库）**：仓库根 `.env`（含模型服务密钥，已被 `.gitignore` 忽略）、
 `%TEMP%\artoo-legal-local.yml`（把应用镜像指向 `:legal` tag 的 compose 覆盖）。
+
+### 15.6 外部系统调用与个人库维护（实机验证）
+
+按 D4/D21 的模型，外部系统（下游 law-agent-lite-backend）**只用一把 API Key** 调用，不带 JWT：
+
+| 步骤 | 调用 | 实测结果 |
+|---|---|---|
+| 签发凭据 | `POST /api/api-keys/me`（默认租户账号的 JWT 换明文 Key，仅一次返回） | `key_type=user_level`，`prefix=sk-…` |
+| 列库 | `GET /api/knowledge-bases` | 200，返回全局法条库 + 本 Key 身份的库 |
+| 建个人库 | `POST /api/knowledge-bases` | 201，`config.chunker_type` 自动为 `laws` |
+| 入库 | `POST /api/knowledge-bases/{kb_id}/documents/upload` | 202/201 → 轮询 `GET /api/documents/{id}` 至 `completed`（实测 19 子块） |
+| 列文档 | `GET /api/knowledge-bases/{kb_id}/documents` | 200，`total=1` |
+| 检索 | `POST /api/retrieval/search`（`kb_ids=[个人库]`） | 200，`source=personal` 命中《城市维护建设税法》第二条（0.999） |
+| 删文档 | `DELETE /api/documents/{doc_id}` | **204** |
+| 删个人库 | `DELETE /api/knowledge-bases/{kb_id}` | **204**（个人库可删；全局库 403） |
+
+**身份边界（实测）**：另建普通用户 `alice` 并签发她自己的 Key 后——
+
+- `GET /api/knowledge-bases` 只看到全局法条库（看不到 `lawadmin` 建的私有个人库）
+- 带 `kb_ids=[lawadmin 的个人库]` 检索 → **404 资源不存在**（存在性不泄露）
+- 不带 `kb_ids` 检索 → 200，返回全局库结果
+
+**由此确定的接入约定**：**一把 Key = 一个身份**。下游若为多个终端用户各建个人库，应当用同一把
+（或少量几把）默认租户身份下的 Key 去建库与维护，这样同一把 Key 既能维护也能检索这些库；库与终端
+用户的对应关系由下游自己的关联表维护（法条库不做逐用户鉴权）。
+
+**「先取库、没有就建」落在下游**：`GET /api/knowledge-bases` 不会自动建库；下游发现返回列表里
+没有该用户的个人库时，先 `POST /api/knowledge-bases` 建库，再取 `GET /api/knowledge-bases/{kb_id}/documents`
+（首次必然为空列表）。若希望改为**服务端在列库时按约定自动建**，需要先定一个「下游用户标识 → 库」的
+命名/标记约定，本轮未做。

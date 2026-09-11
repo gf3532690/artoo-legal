@@ -22,6 +22,7 @@
 | 3 | **不再支持 `session_id`** | 会话附件链路随非召回链路一并移除；相关章节标为「本部署未启用」 |
 | 4 | **结果 `metadata` 追加法条字段** | `law_name`、`article_number`、`article_label`、`chapter`、`source`（取值 `global` / `personal`） |
 | 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
+| 6 | **外部系统用「用户级 Key」，不用代理 Key** | 单租户部署下，调用方持有默认租户内某用户签发的 `user_level` Key：`Authorization: Bearer sk-...` 即可，**不需要** `X-External-User-Id`。1.2 / 1.3 / 第 2 节的代理 Key 通道是上游形态，本部署不采用（其租户被硬锁在内置「外部用户租户」）。详见 2.0 |
 
 ---
 
@@ -144,6 +145,66 @@ await fetch(`${BASE}${path}`, {
 ---
 
 ## 2. 准备：签发代理 Key（一次性，管理员操作）
+
+### 2.0 本部署（法条库）：用用户级 Key（已实测）
+
+单租户部署下**不使用代理 Key**：全局法条库与全部个人库都在同一个默认租户内，而代理 Key
+会把身份锁进内置的「外部用户租户」，读不到默认租户的全局库。调用方改用**用户级 Key**。
+
+**一次性准备**（由默认租户里的账号，在法条库后台 `/api-keys` 页面或调接口完成）：
+
+```bash
+# 1. 该账号登录拿 JWT
+curl -X POST $BASE/api/auth/login -H "Content-Type: application/json" \
+  -d '{"username":"lawadmin","password":"<口令>"}'
+
+# 2. 为自己签发用户级 Key（明文仅此一次返回）
+curl -X POST $BASE/api/api-keys/me \
+  -H "Authorization: Bearer <上一步的 JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"law-agent-lite 调用凭据"}'
+# → { "key": "sk-...", ... }
+```
+
+之后**每一次业务调用只用这一把 Key**，不需要 JWT、不需要 `X-External-User-Id`：
+
+```bash
+KEY=sk-xxxxxxxx
+
+# 3. 列知识库：全局法条库 + 本 Key 所属身份的库
+curl "$BASE/api/knowledge-bases?page=1&page_size=50" -H "Authorization: Bearer $KEY"
+
+# 4. 建个人库（下游为某个终端用户建库；同一个 Key 建的库都归该身份）
+curl -X POST "$BASE/api/knowledge-bases" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" -d '{"name":"个人库-user-alice"}'
+# → 201，config.chunker_type 自动为 laws
+
+# 5. 上传法条到个人库（multipart）
+curl -X POST "$BASE/api/knowledge-bases/<kb_id>/documents/upload" \
+  -H "Authorization: Bearer $KEY" -F "file=@某部法律.docx"
+
+# 6. 列该库文档 / 删文档（内容维护）
+curl "$BASE/api/knowledge-bases/<kb_id>/documents?page=1&page_size=20" -H "Authorization: Bearer $KEY"
+curl -X DELETE "$BASE/api/documents/<doc_id>" -H "Authorization: Bearer $KEY"
+
+# 7. 检索：全局法条库自动带上，个人库由 kb_ids 传入
+curl -X POST "$BASE/api/retrieval/search" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"城市维护建设税的计税依据","kb_ids":["<kb_id>"],"top_k":5}'
+# → results[].metadata.source = "personal" / "global" 区分来源
+```
+
+**边界（实测）**：
+
+- 一把 Key 对应**一个身份**。用它建的库 `owner` 就是该身份，因此同一把 Key 既能维护也能检索这些库。
+- 传了读不到的 `kb_id`（例如别的身份建的私有个人库）→ **404 资源不存在**（存在性不泄露），不是 403。
+- 不带 `kb_ids` 时只检索全局法条库；**不传任何范围也不会 400**，`top_k` 默认 5。
+- 「谁能看哪些库」由调用方自己决定：法条库不做逐用户鉴权，Key 只决定"能不能调这个接口"。
+- 管理类端点（签发/撤销 Key、租户与用户管理）**禁止 API Key 通道**，一律 `403`。
+
+---
+
+> 以下 2.1～2.3 为**上游 Artoo 的代理 Key 流程**，本部署（法条库）不用，保留供参考。
 
 代理 Key 的签发属平台操作，**只能用超级管理员 JWT 调用**。
 
