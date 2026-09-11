@@ -101,8 +101,6 @@ export const knowledgeBaseApi = {
     return request<PageResult<unknown>>(`/knowledge-bases?${qs.toString()}`)
   },
   get: (id: string) => request<unknown>(`/knowledge-bases/${id}`),
-  /** 法条库部署：解析全局法条库（供「法条库」入口直达维护页）。 */
-  getGlobalLegal: () => request<unknown>('/knowledge-bases/legal/global'),
   create: (data: unknown) =>
     request<unknown>('/knowledge-bases', {
       method: 'POST',

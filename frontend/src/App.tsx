@@ -4,7 +4,6 @@ import Layout from './components/Layout'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Documents from './pages/Documents'
 import KnowledgeGraph from './pages/KnowledgeGraph'
-import LegalLibrary from './pages/LegalLibrary'
 import Retrieval from './pages/Retrieval'
 import ApiKeys from './pages/ApiKeys'
 import Models from './pages/Models'
@@ -69,9 +68,6 @@ function App() {
           </RequireAuth>
         }
       >
-        {/* 法条库部署：入口直达全局法条库的内容维护页（不新增检索端点）。
-            必须挂在 Layout 下：放在顶层时这个页面没有左侧菜单，用户进去就出不来了。 */}
-        <Route path="legal" element={<LegalLibrary />} />
         <Route path="knowledge-bases" element={<KnowledgeBase />} />
         <Route path="knowledge-bases/:id" element={<Documents />} />
         <Route path="knowledge-bases/:id/graph" element={<KnowledgeGraph />} />

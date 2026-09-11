@@ -30,10 +30,10 @@ import { useArtifactStore } from '@/stores/artifactStore'
 // - platform：平台菜单（租户管理），仅 Super_Admin 可见。
 // 审计日志归 manage（admin 可见），但 Super_Admin 经下方 SUPER_ADMIN_MENUS 单独放行。
 const navItems = [
-  // 法条库部署：入口直达全局法条库的内容维护页（仅租户管理员可见）。
-  // 取代上游的「知识库」列表入口——本产品线的库范围由下游决定，
-  // 管理员只需要维护全局法条库。
-  { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
+  // 法条库：先给库列表，点进某个库才看文件。
+  // 这里**不**像 lite 端那样点菜单直接进库——法条库后台可能同时存在全局库与本人名下的库，
+  // 直接替用户选一个库会把"我在看哪个库"藏起来。
+  { to: '/knowledge-bases', label: '法条库', icon: Database, group: 'manage' },
   // 检索测试：验证召回的唯一界面（输入 query 看命中的法名/条号与各路 trace）。
   // 维护语料的是租户管理员，验收也应由他们做，因此不再只对超管开放。
   { to: '/retrieval', label: '检索测试', icon: Search, group: 'retrieval' },

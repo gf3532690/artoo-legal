@@ -752,13 +752,19 @@ Authorization: Bearer sk-xxx
 | 默认租户引导 | `auth/bootstrap.py` | 幂等创建唯一默认租户，并创建该租户的管理员（凭据走 env，与 Super_Admin 同模式） |
 | 全局库引导 | `auth/bootstrap.py` | 幂等创建全局法条库：owner = 默认租户管理员，`chunker_type=laws`，`organization` + `read` |
 | 左侧菜单 | `Layout.tsx` | 「法条库」菜单**只给默认租户管理员**；**不要**加入 `SUPER_ADMIN_MENUS` |
-| 直达页面 | `App.tsx` | 独立路由（如 `/legal`），内部解析全局库 id 后渲染维护视图 |
+| 库列表入口 | `Layout.tsx` / `App.tsx` | 「法条库」菜单落在**库列表**（`/knowledge-bases`），由用户自己点进某个库；后台**不**做「直达某个库」的入口 |
 | 文档列表显示法名 | `frontend/src/pages/Documents.tsx` | 展示 `law_name`，人工替换法律时同名重复可见 |
 
 **两处易踩的点**：
 
-1. `Documents.tsx` 目前从 `useParams().id` 取库 id，需要支持显式传入 `kbId`，否则在独立路由下渲染拿不到 id。
+1. `Documents.tsx` 的库 id 一律来自 `useParams().id`（`/knowledge-bases/:id`）。**不要**为「直达某个库」再加一条旁路参数：库列表是唯一的选库入口（见 §15.9）。
 2. `SUPER_ADMIN_ALLOWED_PATHS` 是**精确匹配**的 `Set`，且**只约束 Super_Admin**。租户管理员不受它限制，因此本项**不需要改白名单**——早先稿子要求把它加进去，是基于"超管维护"的错误前提，已更正。
+
+> **已调整（2026-09-11 晚）**：Phase 3 最初实现过一条 `/legal` 直达路由（自动解析全局库 id 后
+> 渲染维护页），并把「法条库」菜单指向它。落地后确认这不合适：**后台可能同时存在全局库和本人名下
+> 的库，替用户选一个会把「我在看哪个库」藏起来**。因此 `/legal` 路由与 `pages/LegalLibrary.tsx`
+> 删除，菜单回到库列表；只有 lite 端（单一库、菜单即内容）才点菜单直接进库。详见
+> [drop-legal-direct-entry](../.agents/notes/implemented/simplification/2026-09-11-drop-legal-direct-entry.md)。
 
 ### Phase 4 · UI 标识改造
 
@@ -769,7 +775,7 @@ Authorization: Bearer sk-xxx
 | 菜单项 | 处置 | 可见性 |
 |---|---|---|
 | 法条库 | **新增**（替代「知识库」） | 租户管理员 |
-| 检索测试 | 保留 | 超管 |
+| 检索测试 | 保留 | 超管 / 租户管理员 |
 | Embedding（含 Rerank） | 保留 | 超管 |
 | API Key | 保留 | 超管 |
 | 租户管理 | 保留 | 超管 |
@@ -920,7 +926,7 @@ M0–M2 硬串行，M3–M5 可并行。
 | 4 | **Lite 落地页仍在演示已删除的能力**：`Landing.tsx` 渲染 `<AgentDemo />`（ReAct 对话演示），能力卡片仍在讲 ReAct Agent、知识图谱、MCP 工具、邀请注册 | 删除 `AgentDemo` 组件并重写落地页：Hero 改条文级召回，能力卡片改为「条文级语义召回 / 入库即结构化 / 目录不入库 / 全局库+个人库 / 接口即能力 / 轻量可私有化部署 / 人工可控的语料治理」 |
 | 5 | 品牌残留：落地页、注册页、改密页、邀请领取页仍写 `Artoo` | 展示文案统一改为「法条库」（`auth.ts` 的 `artoo.jwt` 存储键、CSS 类名、compose 服务名等**代码标识符按 D9 不动**） |
 | 6 | **前端保留指向已删除后端的客户端**：`sessionApi` / `sessionFileApi` / `mcpConfigApi` / `skillsApi` / `agentPresetApi` 及其类型定义仍在 `lib/api.ts` | 删除 347 行死代码；`ArtifactPanel` 与 `artifactStore` 里只服务于会话附件的 `session-file` 分支一并移除（现在只剩 `document` 一种来源） |
-| 7 | 登录后默认落地页指向**已不存在的** `/chat`（非超管会跳到空路由） | 改为 `/legal`（全局法条库维护页） |
+| 7 | 登录后默认落地页指向**已不存在的** `/chat`（非超管会跳到空路由） | 先改为 `/legal`；随后两轮调整：先删 `/home` 概览页、再把 `/legal` 直达入口一并去掉（§15.9）。**当前**：超管 → `/tenants`，租户管理员 → `/retrieval` |
 | 8 | 菜单按 Phase 4 收缩了，但 `/ocr-services`、`/asr-services`、`/invitations` 三张页面与路由仍在 | 页面与路由删除（后端 OCR / ASR / 邀请模块与 API 全部保留） |
 | 9 | `ChatMessagesSkeleton` 组件已无任何引用（随对话链路一起死掉） | 删除 |
 | 10 | 残留「会话」文案：`SettingsDialog` 的平台配置说明、上传限制说明、重置确认弹窗、`Layout.tsx` 与 `lib/api.ts` 的注释仍在描述会话配额与超管配 MCP 预设 | 逐处改写为当前实际语义（单库 chunk 上限、能力配置菜单） |
@@ -1091,3 +1097,34 @@ M0–M2 硬串行，M3–M5 可并行。
 **顺带一条下游体验项**：全局法条库不在下游 `sys_kb_info` 里，其列表按自有真值表算，所以下游用户
 天然看不到、也管不了全局库（这正是我们要的）。若下游要显式展示"全局法条库"这一项，需要把它作为
 只读公共库登记进 `sys_kb_info`，否则保持现状（召回时法条库会自动并入，不需要它登记）。
+
+### 15.9 后台不直达库、lite 端直达（2026-09-11 晚，UI 收敛）
+
+**触发**：实机点菜单时发现两个产品口径混淆——
+
+1. 法条库后台点「法条库」直接进了**全局法条库**的维护页（Phase 3 的 `/legal` 直达路由）。
+2. lite 端点「个人法条库」却先落在库列表，还要再点一次才看到文件。
+
+**结论（两端的正确形态不同，不是同一套）**：
+
+| 端 | 「法条库」菜单点下去 | 理由 |
+|---|---|---|
+| 法条库后台（本仓库） | 进**库列表**，由用户自己选库 | 后台是维护面，可能同时存在全局库与本人名下的库；替用户选中一个库等于把"我在看哪个库"藏起来 |
+| lite 端（`law-agent-lite-application`） | 进**该用户的个人法条库文件列表** | lite 侧一个用户只有一个个人库，库与库名由后端按需创建并锁定，"菜单 = 内容"是唯一合理形态；此外全局库在 lite 侧无 UI，只参与召回 |
+
+**本仓库改动**：
+
+| 项 | 处置 |
+|---|---|
+| `frontend/src/pages/LegalLibrary.tsx` | 删除 |
+| `App.tsx` | 删除 `/legal` 路由（Phase 3 引入的直达入口） |
+| `Layout.tsx` | 「法条库」菜单改回 `/knowledge-bases`（label 与图标不变） |
+| `lib/api.ts` | 删除 `knowledgeBaseApi.getGlobalLegal`（只服务于直达页） |
+| `pages/Documents.tsx` | 去掉 `explicitKbId` 旁路参数，库 id 回到只取 `useParams().id` |
+| 后端 | **未动**：`GET /api/knowledge-bases/legal/global` 端点保留（后端测试引用它，且它是"解析全局库"的唯一稳定契约） |
+
+**验证**：`npm run build`（tsc + vite）通过、`npm test` **34 passed / 7 files** 通过。
+本地 `artoo-frontend:legal` 镜像已重建并重启容器，`/knowledge-bases` 与 `/` 正常返回 SPA、`/legal` 不再有路由（刷新落到 SPA 的空路由）。
+
+**lite 端**：对应改动在 `law-agent-lite-application` 仓库（web 端路由 `/workspace/legal-kb`、admin 端
+`/legal-kb`），不属本仓库范围，此处仅记录两端口径的差异来源。

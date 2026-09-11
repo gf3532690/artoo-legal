@@ -100,15 +100,12 @@ function ToolbarTip({
 
 // 文档管理页面 - Finder 风格
 /**
- * 法条库内容维护页。
+ * 法条库内容维护页，库 id 一律来自路由参数（`/knowledge-bases/:id`）。
  *
- * 默认从路由参数取库 id（`/knowledge-bases/:id`）；法条库入口（`/legal`）不经该
- * 路由，因此支持通过 `explicitKbId` 显式传入目标库 id。
+ * 后台没有「直接进某个库」的入口：`法条库` 菜单落在库列表，由用户自己选库。
  */
-function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
-  const { id: routeKbId } = useParams<{ id: string }>()
-  // 法条库入口（/legal）不经过 /knowledge-bases/:id，由页面显式传入目标库 id。
-  const kbId = explicitKbId ?? routeKbId
+function Documents() {
+  const { id: kbId } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const fileInputRef = useRef<HTMLInputElement>(null)
