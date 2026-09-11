@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.constants import (
+    ApiKeyTypeEnum,
     DEFAULT_LEGAL_KB_NAME,
     DEFAULT_LEGAL_TENANT_ID,
     EXTERNAL_USER_TENANT_ID,
@@ -30,6 +31,7 @@ from app.auth.constants import (
 from app.auth.password import hash_password
 from app.config import get_settings
 from app.schema.db import (
+    ApiKey,
     KnowledgeBase,
     Tenant,
     User,
@@ -194,6 +196,148 @@ async def _default_legal_tenant_bootstrap(session: AsyncSession) -> None:
     await session.commit()
 
 
+def _seeded_key_id(kind: str, raw_key: str) -> str:
+    """由 (用途, 明文) 推导出稳定的 API Key id（= 签名通道的 AK）。
+
+    必须**稳定**，不能每次启动随机：代理 Key 的外部身份命名空间是
+    ``(api_key.id, X-External-User-Id)``（见 ``auth/apikey_auth.py`` 的 ``key_source``）。
+    若 id 每次重建都变，同一个下游用户在同一把 Key 下会解析成**新身份**，旧个人库立刻
+    404（数据还在，只是归到了旧 id 名下）。
+
+    uuid5 不可逆，因此 id 可公开（它本来就是 AK），明文不会从 id 泄漏。
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"artoo-legal/{kind}/{raw_key}"))
+
+
+def _seed_key_or_none(env_name: str, raw: str | None) -> str | None:
+    """读取一条预置 Key 的配置值并做形状校验（空 = 该条不预置）。"""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if len(value) < 16:
+        raise RuntimeError(
+            f"{env_name} 过短（{len(value)} 字符）：预置的 Key 必须与下游配置里那把是按位相同的"
+            f"最长随机串，太短几乎一定是配错了。留空则不预置。"
+        )
+    if not value.startswith("sk-"):
+        # 不致命（校验只比对 SHA256，前缀不影响可用性），但前缀缺失会让人以为是别的凭据。
+        logger.warning("%s 不以 sk- 开头（当前前缀 %r），确认与下游配置一致", env_name, value[:3])
+    return value
+
+
+async def _insert_seeded_key(
+    session: AsyncSession,
+    *,
+    raw_key: str,
+    key_id: str,
+    name: str,
+    key_type: str,
+    tenant_id: str,
+    bound_user_id: str | None = None,
+    key_source: str | None = None,
+) -> None:
+    """按明文预置一把 Key（幂等：按 key_hash 查重，已存在即跳过）。
+
+    **已撤销的 Key 不会被重新激活**：运维显式撤销过就保持撤销（重启复活比 401 更难排查），
+    只记 warning 提示"下游会 401"。
+    """
+    from app.api.auth import get_key_prefix, hash_key
+
+    key_hash = hash_key(raw_key)
+    existing = await session.scalar(select(ApiKey).where(ApiKey.key_hash == key_hash))
+    if existing is not None:
+        if existing.is_active:
+            logger.info("预置 API Key 已存在，跳过：%s（prefix=%s）", name, existing.prefix)
+        else:
+            logger.warning(
+                "预置 API Key 已存在但**已被撤销**，保持撤销状态：%s（prefix=%s）——"
+                "下游用这把 Key 会收到 401；要恢复请清理该行，或换一个 env 值。",
+                name, existing.prefix,
+            )
+        return
+
+    session.add(
+        ApiKey(
+            id=key_id,
+            key_hash=key_hash,
+            prefix=get_key_prefix(raw_key),
+            name=name,
+            is_active=True,
+            call_count=0,
+            tenant_id=tenant_id,
+            key_type=key_type,
+            bound_user_id=bound_user_id,
+            key_source=key_source,
+        )
+    )
+    try:
+        await session.commit()
+    except Exception:
+        # API 与 Worker 首启并发引导时可能撞 key_hash 唯一约束：另一侧已建好，幂等收尾。
+        await session.rollback()
+        if await session.scalar(select(ApiKey).where(ApiKey.key_hash == key_hash)) is None:
+            raise
+        return
+    logger.info("已预置 API Key：%s（prefix=%s, type=%s）", name, get_key_prefix(raw_key), key_type)
+
+
+async def _seed_api_keys(session: AsyncSession) -> None:
+    """按 env 预置两把 API Key，使下游（lite）不必先登录后台手工领取。
+
+    见 ``config.py`` 同名注释：代理 Key 给下游业务链路（Bearer + X-External-User-Id），
+    owner 的用户级 Key 给下游 admin 端维护全局法条库。两项都空则整段跳过（上游形态）。
+
+    与 ``_default_legal_tenant_bootstrap`` 的配合：owner 的 Key 必须绑定默认租户管理员，
+    因此要在那一步之后调用；管理员缺失时只记 warning 并跳过这一把（代理 Key 不受影响）。
+    """
+    settings = get_settings()
+    proxy_raw = _seed_key_or_none(
+        "LEGAL_BOOTSTRAP_PROXY_API_KEY", settings.legal_bootstrap_proxy_api_key
+    )
+    admin_raw = _seed_key_or_none(
+        "LEGAL_BOOTSTRAP_ADMIN_API_KEY", settings.legal_bootstrap_admin_api_key
+    )
+    if not proxy_raw and not admin_raw:
+        return
+
+    if proxy_raw:
+        key_id = _seeded_key_id("proxy", proxy_raw)
+        await _insert_seeded_key(
+            session,
+            raw_key=proxy_raw,
+            key_id=key_id,
+            name="法条库-业务代理Key（预置）",
+            key_type=ApiKeyTypeEnum.EXTERNAL_AGENT.value,
+            tenant_id=settings.external_user_tenant_id,
+            key_source=key_id,  # 命名空间前缀 = 自身 id（与 POST /api/api-keys/external-agent 一致）
+        )
+
+    if admin_raw:
+        username = (settings.legal_tenant_admin_username or "").strip()
+        admin = (
+            await session.scalar(select(User).where(User.username == username))
+            if username
+            else None
+        )
+        if admin is None or admin.tenant_id is None:
+            logger.warning(
+                "配置了 LEGAL_BOOTSTRAP_ADMIN_API_KEY，但%s"
+                "（LEGAL_TENANT_ADMIN_USERNAME=%r）：这一把未预置，下游维护全局法条库会 401",
+                "找不到默认租户管理员" if admin is None else "该管理员不归属任何租户",
+                username,
+            )
+        else:
+            await _insert_seeded_key(
+                session,
+                raw_key=admin_raw,
+                key_id=_seeded_key_id("admin", admin_raw),
+                name="法条库-全局库维护Key（预置）",
+                key_type=ApiKeyTypeEnum.USER_LEVEL.value,
+                tenant_id=admin.tenant_id,
+                bound_user_id=admin.id,
+            )
+
+
 async def run_bootstrap(session_factory) -> None:
     """统一引导入口：由 init_db 之后调用（API 与 Worker 共用）。
 
@@ -208,3 +352,6 @@ async def run_bootstrap(session_factory) -> None:
 
     async with session_factory() as session:
         await _default_legal_tenant_bootstrap(session)
+
+    async with session_factory() as session:
+        await _seed_api_keys(session)

@@ -1123,8 +1123,64 @@ M0–M2 硬串行，M3–M5 可并行。
 | `pages/Documents.tsx` | 去掉 `explicitKbId` 旁路参数，库 id 回到只取 `useParams().id` |
 | 后端 | **未动**：`GET /api/knowledge-bases/legal/global` 端点保留（后端测试引用它，且它是"解析全局库"的唯一稳定契约） |
 
-**验证**：`npm run build`（tsc + vite）通过、`npm test` **34 passed / 7 files** 通过。
-本地 `artoo-frontend:legal` 镜像已重建并重启容器，`/knowledge-bases` 与 `/` 正常返回 SPA、`/legal` 不再有路由（刷新落到 SPA 的空路由）。
+**验证**：`npm run build`（tsc + vite）通过、`npm test` **34 passed / 7 files** 通过
+（改动前同样是 34 passed，用于确认没有引入回归）。本地 `artoo-frontend:legal` 镜像已重建
+（含本次改动）。**但容器没有用新镜像重启过**——本次收尾按要求停栈交给运维自行启动，因此
+"点菜单落在库列表"这一条**是代码层面的结论，未在浏览器里点过**。启动时若 compose 没有自动
+重建容器，用 `docker compose ... up -d --force-recreate frontend`。
 
 **lite 端**：对应改动在 `law-agent-lite-application` 仓库（web 端路由 `/workspace/legal-kb`、admin 端
 `/legal-kb`），不属本仓库范围，此处仅记录两端口径的差异来源。
+
+### 15.10 预置 API Key：下游不必先登录后台领 Key（2026-09-11 晚）
+
+**背景**：下游 lite 要用两把 Key 才能工作——业务代理 Key（个人库 + 检索）与全局库 owner
+名下的用户级 Key（admin 端维护全局库）。原流程是人工登两种账号各领一次，且**每次重建数据卷
+都要重来**；更糟的失败形态是"库里 Key 没了、下游静默 401"。
+
+**处置**：新增两项可选配置，配了就在引导阶段**幂等播种**（库里仍只存 SHA256，明文只留在 env）：
+
+| 配置项 | 播种的 Key | 下游对应配置 |
+|---|---|---|
+| `LEGAL_BOOTSTRAP_PROXY_API_KEY` | `key_type=external_agent`，tenant 锁 `EXTERNAL_USER_TENANT_ID` | `legal-kb.api-key`（Bearer + `X-External-User-Id`） |
+| `LEGAL_BOOTSTRAP_ADMIN_API_KEY` | `key_type=user_level`，绑定默认租户管理员 | `legal-kb.admin-api-key`（admin 端维护全局库） |
+
+两条留空即整段跳过，保持上游 Artoo 形态（Key 由后台手工签发）。
+
+**三个设计取舍**：
+
+1. **Key id 由 (用途, 明文) 经 uuid5 推导，不用随机 uuid4**。代理 Key 的外部身份命名空间是
+   `(api_key.id, X-External-User-Id)`（§15.8 第 4 条已记录"换 Key = 换身份 = 旧个人库 404"）。
+   若 id 每次部署都变，同一个 env 值重建后也会把老用户的个人库变成"不存在"。uuid5 不可逆，
+   所以 id（=签名通道的 AK）可公开而不泄漏明文。
+2. **按 `key_hash` 查重、且不复活已撤销的 Key**：运维显式撤销过就保持撤销（重启复活比 401
+   更难排查），只在日志里 warning 说明"下游会 401"。
+3. **明文短于 16 字符即 fail-fast**：这类配置写错只会表现为下游 401，宁可启动期就拦下来。
+
+**验证状态：未实跑**（本次改动后没有重启本地栈——由运维自行启动验证；后端镜像
+`artoo-backend:legal` 已重建，含本改动）。已验证的部分只有静态检查：`ast.parse` 语法通过、
+`docker build` 通过。**下列运行时行为待启动后确认**：
+
+| 场景 | 期望 |
+|---|---|
+| 给 env 填两把**全新**Key → 重启后端 | 日志出现两条「已预置 API Key」，`api_keys` 表各多一行 |
+| 用新代理 Key + `X-External-User-Id` 调 `GET /api/knowledge-bases` | **200** |
+| 用新 owner Key 调 `GET /api/knowledge-bases/legal/global` | **200**（能解析到全局库） |
+| 再次重启（幂等） | 日志「已存在，跳过」，不重复建行 |
+| 撤销某把预置 Key 后重启 | 保持撤销状态，只记 warning（不复活） |
+| env 留空 | 一行日志都没有，`api_keys` 表无变化（上游形态） |
+
+**最小验证命令**（法条库栈起来之后，把 `<key>` 换成 env 里填的那把）：
+
+```bash
+# 业务代理 Key：应 200 并返回库列表（含全局法条库）
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer <proxy-key>" \
+     -H "X-External-User-Id: probe-1" http://127.0.0.1:8000/api/knowledge-bases
+
+# 全局库维护 Key：应 200 并返回全局法条库对象
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer <admin-key>" \
+     http://127.0.0.1:8000/api/knowledge-bases/legal/global
+```
+
+> 这是**长期共享密钥**：轮换要同时改法条库 env 与下游配置；改完重启法条库即播种新值，
+> 旧 Key 仍在（需要时在后台撤销）。

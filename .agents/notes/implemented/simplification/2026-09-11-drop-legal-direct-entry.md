@@ -74,6 +74,8 @@ two ends no longer share one rule — this note is the place that records why.
 
 `npm run build` (tsc + vite) and `npm test` (34 tests) pass in `frontend/`.
 
-The `artoo-frontend:legal` image was rebuilt and the container restarted on the
-running stack; `/` and `/knowledge-bases` return the SPA, and `/legal` is no
-longer a route.
+The `artoo-frontend:legal` image was rebuilt with the change. The running stack
+was **not** restarted with it — the local stack was stopped at the end of this
+round and left for the operator to start, so the "menu lands on the library
+list" behaviour is a code-level result that was not clicked through in a
+browser.

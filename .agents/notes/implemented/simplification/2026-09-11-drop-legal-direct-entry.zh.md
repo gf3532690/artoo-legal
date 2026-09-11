@@ -58,5 +58,6 @@ lite 端继续点菜单直达个人库文件列表，两端不再共用一条规
 
 `frontend/` 下 `npm run build`（tsc + vite）与 `npm test`（34 个用例）通过。
 
-运行中的栈已重建 `artoo-frontend:legal` 镜像并重启容器；`/` 与 `/knowledge-bases` 返回
-SPA，`/legal` 不再是路由。
+`artoo-frontend:legal` 镜像已带上本次改动重建。**但没有用新镜像重启过容器**——本轮结束时
+本地栈被停掉、交由运维自行启动，因此「点菜单落在库列表」是代码层面的结论，没有在浏览器里
+点过。

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/feature/2026-09-11-bootstrap-seeded-api-keys.md .agents/notes/implemented/feature/2026-09-11-bootstrap-seeded-api-keys.zh.md
+2026-09-11-bootstrap-seeded-api-keys.md: fa2302ac0f6a06e2a40ac6e2cc91e461c68bdb98
+2026-09-11-bootstrap-seeded-api-keys.zh.md: 163052e11a01eb664d4a1851e79e474f564acc52

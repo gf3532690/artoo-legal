@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/simplification/2026-09-11-drop-legal-direct-entry.md .agents/notes/implemented/simplification/2026-09-11-drop-legal-direct-entry.zh.md
-2026-09-11-drop-legal-direct-entry.md: 834d702f70846fd6b52e1eb57ea9e786e7aba50f
-2026-09-11-drop-legal-direct-entry.zh.md: f784f6fccc404bcd11d6394eecb894e3be574b08
+2026-09-11-drop-legal-direct-entry.md: 485f68b5d5369fb4be51511cd69105ca7924cd4b
+2026-09-11-drop-legal-direct-entry.zh.md: 9fe6adbd2995b63b11ebf2e12123d7a165be4b11

@@ -230,6 +230,26 @@ class Settings(BaseSettings):
     # 需要退回上游形态时把本项设回 ``tenant-external-builtin`` 即可。
     external_user_tenant_id: str = DEFAULT_LEGAL_TENANT_ID
 
+    # ---- 预置 API Key（可选，空 = 不预置，与上游 Artoo 一致）----
+    #
+    # 本部署是「法条库 + 下游 lite」两套独立应用，下游至少要两把 Key 才能工作：
+    #   1. 业务代理 Key（external_agent）：下游带 Authorization + X-External-User-Id
+    #      调用个人库的建库/上传/列表/删除与 /api/retrieval/search；
+    #   2. 全局库 owner（默认租户管理员）名下的用户级 Key（user_level）：下游 admin 端
+    #      维护全局法条库用（写判定要求 owner 身份，代理 Key 写会被 403）。
+    # 不预置就得人工登录后台分别领取一次，且每次重建数据卷都要重来一遍。
+    #
+    # 这里配了就在引导阶段幂等播种：库里仍然只存 SHA256（明文只存在于 env）。
+    #   LEGAL_BOOTSTRAP_PROXY_API_KEY -> external_agent 代理 Key
+    #   LEGAL_BOOTSTRAP_ADMIN_API_KEY -> 默认租户管理员名下的 user_level Key
+    # 两把 Key 的 id 由 (用途, 明文) 推导（uuid5），保证反复部署用同一个 env 值仍是
+    # 同一个身份命名空间——代理 Key 换 id 会让同一外部用户变成新身份、旧个人库读不到
+    # （见 docs/legal-recall-implementation-plan.md §15.8 第 4 条）。
+    #
+    # 代价：这两把是**长期共享密钥**，明文留在 env 里；轮换要同时改法条库 env 与下游配置。
+    legal_bootstrap_proxy_api_key: str = ""
+    legal_bootstrap_admin_api_key: str = ""
+
     # 注册模式（env 可配置）：
     #   invite_only（默认）—— 关闭自助注册：登录页无注册入口，/api/auth/register 返回 403；
     #     建号仅由租户管理员在本租户内创建，或经邀请链接。
