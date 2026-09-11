@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-11-bootstrap-seeded-api-keys.md .agents/notes/implemented/feature/2026-09-11-bootstrap-seeded-api-keys.zh.md
-2026-09-11-bootstrap-seeded-api-keys.md: 25506444dc9c988c1be75fb246947e3eb1402b70
-2026-09-11-bootstrap-seeded-api-keys.zh.md: 52df88693d0c490936971b1d13600c62968cf495
+2026-09-11-bootstrap-seeded-api-keys.md: 16bdc700fd0eeb992e1f39a32239d044451d1efb
+2026-09-11-bootstrap-seeded-api-keys.zh.md: 489b38f69ff31a62bba0452b4a0afcb4726589d4

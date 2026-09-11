@@ -75,7 +75,7 @@ two ends no longer share one rule — this note is the place that records why.
 `npm run build` (tsc + vite) and `npm test` (34 tests) pass in `frontend/`.
 
 The `artoo-frontend:legal` image was rebuilt with the change. The running stack
-was **not** restarted with it — the local stack was stopped at the end of this
-round and left for the operator to start, so the "menu lands on the library
-list" behaviour is a code-level result that was not clicked through in a
-browser.
+was restarted on it afterwards: the container's served assets contain neither
+the deleted page's copy (未找到全局法条库) nor its call to
+`knowledge-bases/legal/global`. The "menu lands on the library list" behaviour
+itself was not clicked through in a browser — only the artifact was checked.

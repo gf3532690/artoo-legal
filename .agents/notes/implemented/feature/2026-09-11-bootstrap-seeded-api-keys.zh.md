@@ -75,7 +75,10 @@ env 文件里。两条都留空则整段跳过，即上游 Artoo 的形态（Key
 
 ## Verification
 
-**未在运行时验证。** 改动只做了静态检查（对改过的模块跑 `ast.parse`）与
-`docker build -t artoo-backend:legal ./backend` 通过；本地栈在任何重启之前就被停掉了，
-因此没有播种过 Key，也没有用播种的 Key 发过请求。方案 §15.10 列出了预期行为，以及启动后
-确认它的两条 `curl`（每把 Key 一条）。
+静态：对改过的模块跑 `ast.parse`，以及 `docker build -t artoo-backend:legal ./backend` 通过。
+
+运行时（2026-09-11 15:43，本地栈重启）：引导日志对两把配置 Key 都打出
+`预置 API Key 已存在，跳过`（即幂等分支），且 `.env` 里这两个值都能认证成功——代理 Key 用
+`民法典第146条` 拿到 3 条结果（top1 民法典第一百四十六条，`source=global`），owner Key 解析出
+`GET /api/knowledge-bases/legal/global`。**创建分支**（填一个**全新**值 → 建行）与
+「已撤销的 Key 不复活」两条**尚未跑**。预期行为与探测命令保留在方案 §15.10。

@@ -1124,10 +1124,10 @@ M0–M2 硬串行，M3–M5 可并行。
 | 后端 | **未动**：`GET /api/knowledge-bases/legal/global` 端点保留（后端测试引用它，且它是"解析全局库"的唯一稳定契约） |
 
 **验证**：`npm run build`（tsc + vite）通过、`npm test` **34 passed / 7 files** 通过
-（改动前同样是 34 passed，用于确认没有引入回归）。本地 `artoo-frontend:legal` 镜像已重建
-（含本次改动）。**但容器没有用新镜像重启过**——本次收尾按要求停栈交给运维自行启动，因此
-"点菜单落在库列表"这一条**是代码层面的结论，未在浏览器里点过**。启动时若 compose 没有自动
-重建容器，用 `docker compose ... up -d --force-recreate frontend`。
+（改动前同样是 34 passed，用于确认没有引入回归）。本地 `artoo-frontend:legal` 镜像已重建，
+并在 2026-09-11 15:43 重启栈后**实测**运行中的容器跑的就是这份构建：容器内 `/usr/share/nginx/html/assets`
+里既搜不到被删页面的文案「未找到全局法条库」，也搜不到它调用的 `knowledge-bases/legal/global`。
+"点菜单落在库列表"仍**未在浏览器里点过**（只验证了产物）。
 
 **lite 端**：对应改动在 `law-agent-lite-application` 仓库（web 端路由 `/workspace/legal-kb`、admin 端
 `/legal-kb`），不属本仓库范围，此处仅记录两端口径的差异来源。
@@ -1157,18 +1157,17 @@ M0–M2 硬串行，M3–M5 可并行。
    更难排查），只在日志里 warning 说明"下游会 401"。
 3. **明文短于 16 字符即 fail-fast**：这类配置写错只会表现为下游 401，宁可启动期就拦下来。
 
-**验证状态：未实跑**（本次改动后没有重启本地栈——由运维自行启动验证；后端镜像
-`artoo-backend:legal` 已重建，含本改动）。已验证的部分只有静态检查：`ast.parse` 语法通过、
-`docker build` 通过。**下列运行时行为待启动后确认**：
+**验证状态**：静态检查（`ast.parse`、`docker build`）全过；运行时在 2026-09-11 15:43
+重启本地栈后验证了「两把 Key 对得上 + 幂等」两行，其余三行仍**未跑**：
 
-| 场景 | 期望 |
-|---|---|
-| 给 env 填两把**全新**Key → 重启后端 | 日志出现两条「已预置 API Key」，`api_keys` 表各多一行 |
-| 用新代理 Key + `X-External-User-Id` 调 `GET /api/knowledge-bases` | **200** |
-| 用新 owner Key 调 `GET /api/knowledge-bases/legal/global` | **200**（能解析到全局库） |
-| 再次重启（幂等） | 日志「已存在，跳过」，不重复建行 |
-| 撤销某把预置 Key 后重启 | 保持撤销状态，只记 warning（不复活） |
-| env 留空 | 一行日志都没有，`api_keys` 表无变化（上游形态） |
+| 场景 | 期望 | 状态 |
+|---|---|---|
+| 用 `.env` 里的代理 Key + `X-External-User-Id` 调 `POST /api/retrieval/search` | 200 且命中 | **实测通过**：`民法典第146条` → total=3，top1 = 民法典第一百四十六条（0.6972，`source=global`） |
+| 用 `.env` 里的 owner Key 调 `GET /api/knowledge-bases/legal/global` | 200 | **实测通过**：返回全局库（`is_default_legal_kb=true`，`doc_count=3`） |
+| 已存在的预置 Key → 重启后端 | 日志「已存在，跳过」，不重复建行 | **实测通过**：两条「预置 API Key 已存在，跳过」（prefix `sk-cad8c30…` / `sk-50eb0916…`） |
+| 给 env 填两把**全新**Key → 重启后端 | 日志两条「已预置 API Key」，`api_keys` 表各多一行 | 未跑 |
+| 撤销某把预置 Key 后重启 | 保持撤销状态，只记 warning（不复活） | 未跑 |
+| env 留空 | 一行日志都没有，`api_keys` 表无变化（上游形态） | 未跑 |
 
 **最小验证命令**（法条库栈起来之后，把 `<key>` 换成 env 里填的那把）：
 

@@ -103,8 +103,13 @@ API Key) and §6 (全局法条库与个人法条库), which ships inside the off
 
 ## Verification
 
-Not run at runtime. The change was checked statically (`ast.parse` on the edited
-modules) and `docker build -t artoo-backend:legal ./backend` succeeds; the local
-stack was stopped before any restart, so no key was seeded and no request was
-made with one. The implementation plan §15.10 lists the expected behaviour and
-the two `curl` probes (one per key) that confirm it after startup.
+Static: `ast.parse` on the edited modules, plus
+`docker build -t artoo-backend:legal ./backend`.
+
+Runtime (2026-09-11 15:43, local stack restarted): bootstrap logged
+`预置 API Key 已存在，跳过` for both configured keys (the idempotent branch), and
+both `.env` values authenticate — the proxy key returned 3 hits for
+`民法典第146条` (top1 民法典第一百四十六条, `source=global`) and the owner key
+resolved `GET /api/knowledge-bases/legal/global`. The creation branch (a *new*
+value → a new row) and the "revoked keys stay revoked" branch are **not** run
+yet. The plan's §15.10 keeps the expected behaviour and the probes.
