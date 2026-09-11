@@ -38,6 +38,8 @@ Thumbs.db
 
 # Environment
 .env
+# 本地测试用的 compose 覆盖（把镜像指向 fork 自己的 tag），不进仓库
+docker-compose.local.yml
 .env.local
 .env.*.local
 
