@@ -94,6 +94,15 @@ cp deploy/DEPLOY.md "$OUT/"
 mkdir -p "$OUT/frontend/public"
 cp frontend/public/config.js "$OUT/frontend/public/config.js"
 
+# 预置部署配置：仓库根的 .env.deploy（不入库，含真实密钥）渲染成 dist/.env，
+# 让每次出包都自带可直接 install.sh 的配置（install.sh 只在 .env 不存在时才从 .env.example 生成）。
+if [[ -f .env.deploy ]]; then
+  cp .env.deploy "$OUT/.env"
+  echo "  已带入预置部署配置：.env.deploy -> dist/.env"
+else
+  echo "  ⚠️ 未找到 .env.deploy：dist/ 里只有 .env.example，部署时需要自行填写必填项"
+fi
+
 echo ""
 echo "=== 完成 ==="
 du -sh "$OUT"

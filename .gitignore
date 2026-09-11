@@ -38,6 +38,8 @@ Thumbs.db
 
 # Environment
 .env
+# 部署配置（真实密钥）：打包脚本会把它渲染成 dist/.env 一起交付，但文件本身不入库
+.env.deploy
 # 本地测试用的 compose 覆盖（把镜像指向 fork 自己的 tag），不进仓库
 docker-compose.local.yml
 .env.local

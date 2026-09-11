@@ -109,6 +109,16 @@ Copy-Item deploy\DEPLOY.md "$OUT\"
 New-Item -ItemType Directory -Force -Path "$OUT\frontend\public" | Out-Null
 Copy-Item frontend\public\config.js "$OUT\frontend\public\config.js"
 
+# 预置部署配置：仓库根的 .env.deploy（不入库，含真实密钥）在打包时渲染成 dist\.env，
+# 这样每次出包都自带一份可直接 install.sh 的配置，不需要在服务器上手改。
+# install.sh 只在「.env 不存在」时用 .env.example 生成，因此带上 dist\.env 就等于跳过这一步。
+if (Test-Path ".env.deploy") {
+    Copy-Item ".env.deploy" "$OUT\.env"
+    Write-Host "  已带入预置部署配置：.env.deploy -> dist\.env" -ForegroundColor DarkGray
+} else {
+    Write-Host "  ⚠️ 未找到 .env.deploy：dist\ 里只有 .env.example，部署时需要自行填写必填项" -ForegroundColor Yellow
+}
+
 if ($Tar) {
     Write-Host "[5/5] 生成压缩包 artoo-deploy.tar.gz..." -ForegroundColor Cyan
     if (Test-Path "artoo-deploy.tar.gz") { Remove-Item "artoo-deploy.tar.gz" -Force }

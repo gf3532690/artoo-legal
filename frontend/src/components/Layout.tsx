@@ -13,7 +13,6 @@ import {
   Users as UsersIcon,
   ScrollText,
   ChevronUp,
-  Home,
   UserCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -31,14 +30,13 @@ import { useArtifactStore } from '@/stores/artifactStore'
 // - platform：平台菜单（租户管理），仅 Super_Admin 可见。
 // 审计日志归 manage（admin 可见），但 Super_Admin 经下方 SUPER_ADMIN_MENUS 单独放行。
 const navItems = [
-  // 首页：所有已登录身份都可见（含成员）。登录后的默认落地页，
-  // 列出当前身份能去的入口，避免一登录就被塞进某个维护页。
-  { to: '/home', label: '首页', icon: Home, group: 'home' },
   // 法条库部署：入口直达全局法条库的内容维护页（仅租户管理员可见）。
   // 取代上游的「知识库」列表入口——本产品线的库范围由下游决定，
   // 管理员只需要维护全局法条库。
   { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
-  { to: '/retrieval', label: '检索测试', icon: Search, group: 'capability' },
+  // 检索测试：验证召回的唯一界面（输入 query 看命中的法名/条号与各路 trace）。
+  // 维护语料的是租户管理员，验收也应由他们做，因此不再只对超管开放。
+  { to: '/retrieval', label: '检索测试', icon: Search, group: 'retrieval' },
   { to: '/embed-config', label: 'Embedding', icon: Layers, group: 'capability' },
   // API Key：超管签发平台级代理 Key；租户管理员在这里给自己领用户级 Key
   // （全局法条库只有 owner 能写，owner 就是该租户管理员本人）。
@@ -72,7 +70,6 @@ function Layout() {
   //   不再显示能力配置（capability，已上收平台）。
   // - member（普通成员）：仅内容菜单（content）。
   const SUPER_ADMIN_MENUS = new Set([
-    '/home',
     '/tenants',
     '/audit-logs',
     '/embed-config',
@@ -80,7 +77,7 @@ function Layout() {
     '/api-keys',
   ])
   const visibleNavItems = navItems.filter((item) => {
-    if (item.group === 'home') return true // 首页对所有人可见
+    if (item.group === 'retrieval') return isSuperAdmin || isAdmin // 检索测试对装配方与语料维护方都开放
     if (item.group === 'apikey') return isSuperAdmin || isAdmin
     if (isSuperAdmin) return SUPER_ADMIN_MENUS.has(item.to)
     if (item.group === 'platform') return false // 平台菜单仅 Super_Admin
@@ -96,7 +93,6 @@ function Layout() {
   // 超管可访问：平台菜单（租户管理/审计日志）、平台能力配置（Embedding/检索测试/
   // API Key，capability-config-to-platform）、账号自助页（改密）。
   const SUPER_ADMIN_ALLOWED_PATHS = new Set([
-    '/home',
     '/tenants',
     '/audit-logs',
     '/change-password',
