@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/process/2026-09-11-fix-windows-offline-packaging.md .agents/notes/implemented/process/2026-09-11-fix-windows-offline-packaging.zh.md
+2026-09-11-fix-windows-offline-packaging.md: ce419b7b1a94474aac9993dd34d523782646b528
+2026-09-11-fix-windows-offline-packaging.zh.md: a9617a791a2921c4c47dc023bdaf022b61980d4c

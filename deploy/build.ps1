@@ -26,7 +26,13 @@ $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
 $platformArgs = @()
-if ($Arch) { $platformArgs = @("--platform", "linux/$Arch") }
+$savePlatformArgs = @()
+if ($Arch) {
+    $platformArgs = @("--platform", "linux/$Arch")
+    # 跨架构导出必须指定平台：containerd 镜像存储下不指定会报
+    # "no suitable export target found ... does not provide the specified platform"。
+    $savePlatformArgs = @("--platform", "linux/$Arch")
+}
 
 $OUT = "dist"
 New-Item -ItemType Directory -Force -Path $OUT | Out-Null
@@ -46,7 +52,8 @@ docker build @platformArgs -t artoo-frontend:latest frontend/
 if ($LASTEXITCODE -ne 0) { throw "前端镜像构建失败" }
 
 Write-Host "[2/4] 导出应用镜像..." -ForegroundColor Cyan
-docker save artoo-backend:latest artoo-frontend:latest -o "$OUT\app-images.tar"
+docker save @savePlatformArgs artoo-backend:latest artoo-frontend:latest -o "$OUT\app-images.tar"
+if ($LASTEXITCODE -ne 0) { throw "导出应用镜像失败" }
 
 if (-not $AppOnly) {
     Write-Host "[3/4] 拉取并导出中间件镜像..." -ForegroundColor Cyan
@@ -62,10 +69,21 @@ if (-not $AppOnly) {
         Write-Host "  （含 Neo4j 镜像）" -ForegroundColor DarkGray
     }
     foreach ($img in $infraImages) {
+        # 经典 overlay2 存储下，一个 tag 只能存在一个架构。若本地残留的是其它架构副本，
+        # 直接 pull 不会换架构，导出的包与目标架构不符（且 save --platform 会静默拿旧架构），
+        # 因此先删掉架构不符的本地副本再拉取。
+        if ($Arch) {
+            $localArch = (docker image inspect $img --format '{{.Architecture}}' 2>$null)
+            if ($localArch -and $localArch -ne $Arch) {
+                Write-Host "  本地 $img 为 $localArch，与目标 $Arch 不符，删除后重新拉取..." -ForegroundColor DarkGray
+                docker rmi $img 2>$null | Out-Null
+            }
+        }
         docker pull @platformArgs $img
         if ($LASTEXITCODE -ne 0) { throw "拉取镜像失败: $img" }
     }
-    docker save $infraImages -o "$OUT\infra-images.tar"
+    docker save @savePlatformArgs $infraImages -o "$OUT\infra-images.tar"
+    if ($LASTEXITCODE -ne 0) { throw "导出中间件镜像失败" }
 } else {
     Write-Host "[3/4] 跳过中间件镜像（-AppOnly）" -ForegroundColor Cyan
     # 清理上次完整构建残留的中间件包，避免压缩时误带
@@ -81,6 +99,11 @@ Copy-Item .env.example "$OUT\"
 New-Item -ItemType Directory -Force -Path "$OUT\deploy" | Out-Null
 Copy-Item deploy\milvus-user.yaml "$OUT\deploy\"
 Copy-Item deploy\install.sh "$OUT\"
+# Milvus 拓扑切换用的数据清除脚本：必须随包交付，否则运维在服务器上无脚本可执行
+# （与 build.sh 保持一致；脚本自身会向上一级找 docker-compose.yml，两种布局都兼容）。
+Copy-Item deploy\reset-knowledge-data.sh "$OUT\deploy\"
+# 运维部署手册：随包交付，运维在服务器上可直接查阅。
+Copy-Item deploy\DEPLOY.md "$OUT\"
 # 前端运行时配置：compose 把 ./frontend/public/config.js 只读挂载进容器覆盖镜像内默认。
 # 离线包必须带上此文件，否则宿主路径不存在时 Docker 会按目录创建，导致挂载失败。
 New-Item -ItemType Directory -Force -Path "$OUT\frontend\public" | Out-Null
