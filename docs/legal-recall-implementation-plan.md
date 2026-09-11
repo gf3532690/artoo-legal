@@ -927,3 +927,45 @@ M0–M2 硬串行，M3–M5 可并行。
 3. **MCP 配置字段与 DB 模型保留**：`config.py` 的 `mcp_*` 设置、`schema/db.py` 的 `mcp_configs` / `agent_presets` / `custom_skills` / `chat_sessions` / `session_files` 表与 ORM 模型都还在。理由是按 D8「共享文件只做最小改动」与「除非明显提升轻量化与部署精简，否则先隐藏」——删表还要连带改 `storage/database.py` 的迁移语句与 `tenant_repo` 的隔离类清单，收益低、分叉面大。`api/document.py` 的 `/api/files/{file_id}/content` 仍会读 `SessionFile`，属保留代码路径。
 4. **前端仍保留 OCR / ASR / 邀请的 API 客户端**（`ocrConfigApi` / `asrConfigApi` / `adminApi.invitations*` / `inviteApi`）：对应后端端点都还在，属「模块保留、UI 收缩」的 API 面，不删。
 5. **邀请领取页 `/invite/:token` 保留**：它是深链页面而非菜单项，后端 `invitation_routes.py` 也保留；单租户部署下的正常流程是管理员在「用户管理」里建账号，用不到邀请。
+
+### 15.5 实机验证（2026-09-11，真跑）
+
+本机 Docker Desktop（Compose v2.40）拉起完整栈：`etcd / minio / milvus / postgres / redis` +
+`backend / worker / frontend` 共 8 个容器全部 healthy。镜像由本 fork 现构建
+（`artoo-backend:legal` / `artoo-frontend:legal`，避免覆盖 aladdin 的 `:latest`）。
+
+**环境**：单租户引导自动完成——租户 `tenant-legal-default`、租户管理员 `lawadmin`、全局法条库
+（`config={"chunker_type":"laws","is_default_legal_kb":true}`、`organization` + `read`）。
+远程模型服务用同一个 Infinity 实例 `10.30.1.6:7997`（`/embeddings` dim=1024、`/rerank` 均可用）。
+
+**验证结果**（逐项实测，非推断）：
+
+| 验证项 | 结果 |
+|---|---|
+| `GET /` | `{"message":"Legal recall service is running"}` |
+| 不传 `kb_ids` 检索 | **200**（不再 400），默认并入全局法条库 |
+| `top_k` 默认值 | 返回 5 条；显式 `top_k=2` 返回 2 条 |
+| 显式传 `session_id` | **400** `本部署不支持 session_id：会话附件链路已移除…` |
+| 删除全局法条库 | **403** `全局法条库不允许删除…` |
+| 改全局库 `chunker_type` | **403** `…不允许修改 chunker_type：法条结构化入库依赖它` |
+| 入库《国籍法》 | 父块 19 / 子块 26；`law_name`、`article_number`(24 条)、`article_label`、`issuing_authority`、`publish_date` 全部抽对 |
+| Milvus `content` 前缀 | `[中华人民共和国国籍法 第1条] 第一条 …`（阿拉伯数字条号，供 BM25 命中） |
+| 接口返回的 `content` | 已剥离索引前缀（`strip_content_prefix` 生效） |
+| 入库《民法典》 | 子块 **2059**；2039 条带条号；**目录已剥离**（`has_toc=true`）；`第一千条`、`第一百四十六条` 数字转换正确；`chapter` 只留「编 / 章 / 节」 |
+| 入库《刑法修正案》（无条文结构） | 27 子块，`article_number` 全为 `null`（符合 D11）；23 块抽到 `referenced_articles=["第一百六十二条"]` |
+| 词法查询「民法典第146条」 | top1 = 《民法典》第一百四十六条（0.697）——D12 归一与 BM25 前缀生效 |
+| 语义查询「虚假意思表示的民事法律行为效力」 | top1 = 第一百四十六条 |
+| 个人库合并 | 自建个人库并入《烟叶税法》后，带 `kb_ids` 检索同时返回 `source=personal` 与 `source=global`，按 rank 合并（D6） |
+| 前端 | `:8888` 返回 SPA，标题「法条库 · 法条召回服务」，`/api` 反向代理通 |
+
+**实测中发现的两点（非阻塞，供后续参考）**：
+
+1. `EMBED_SPARSE_ENABLED=true` 时会对 `{base}/embed_sparse` 发请求；当前 Infinity 实例不提供该端点
+   （返回 404），代码按设计**降级为占位稀疏向量**。若稀疏路要真正生效，需要 TEI 或本仓库旁
+   `embedding-rerank-server` 那类实现了 `/embed_sparse` 的服务。
+2. 单源检索中某一路（如 dense）抛错时，`trace` 会记录该路异常，但响应顶层的 `degraded`
+   只反映**多源**失败（上游既有语义）。即模型服务不可用时仍返回 200 + 空/少量结果而不置
+   `degraded`，调用方若要感知需读 `trace.routes`。
+
+**本地测试脚手架（不入库）**：仓库根 `.env`（含模型服务密钥，已被 `.gitignore` 忽略）、
+`%TEMP%\artoo-legal-local.yml`（把应用镜像指向 `:legal` tag 的 compose 覆盖）。
