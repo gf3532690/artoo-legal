@@ -40,7 +40,9 @@ const navItems = [
   { to: '/legal', label: '法条库', icon: Database, group: 'manage' },
   { to: '/retrieval', label: '检索测试', icon: Search, group: 'capability' },
   { to: '/embed-config', label: 'Embedding', icon: Layers, group: 'capability' },
-  { to: '/api-keys', label: 'API Key', icon: Key, group: 'capability' },
+  // API Key：超管签发平台级代理 Key；租户管理员在这里给自己领用户级 Key
+  // （全局法条库只有 owner 能写，owner 就是该租户管理员本人）。
+  { to: '/api-keys', label: 'API Key', icon: Key, group: 'apikey' },
   { to: '/tenants', label: '租户管理', icon: Building2, group: 'platform' },
   { to: '/users', label: '用户管理', icon: UsersIcon, group: 'manage' },
   { to: '/audit-logs', label: '审计日志', icon: ScrollText, group: 'manage' },
@@ -79,6 +81,7 @@ function Layout() {
   ])
   const visibleNavItems = navItems.filter((item) => {
     if (item.group === 'home') return true // 首页对所有人可见
+    if (item.group === 'apikey') return isSuperAdmin || isAdmin
     if (isSuperAdmin) return SUPER_ADMIN_MENUS.has(item.to)
     if (item.group === 'platform') return false // 平台菜单仅 Super_Admin
     if (item.group === 'capability') return false // 能力配置仅 Super_Admin（已上收平台）

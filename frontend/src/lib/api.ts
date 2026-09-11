@@ -400,6 +400,15 @@ export const apiKeyApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  // 平台级 Key（代理 Key）：仅超管。以下是「本人用户级 Key」的自助入口——
+  // 任何登录用户都能给自己领一把，绑定本人并继承其实时权限（后端 /api-keys/me 已具备）。
+  // 法条库部署里这条路径是给租户管理员用的：全局法条库只有 owner 能写，owner 就是他本人。
+  listMine: () => request<{ items: unknown[]; total: number }>('/api-keys/me').then(res => res.items),
+  createMine: (data: { name?: string }) =>
+    request<unknown>('/api-keys/me', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   delete: (id: string) =>
     request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
 }

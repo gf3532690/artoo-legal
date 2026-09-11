@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Key, Copy, Check } from 'lucide-react'
 import { apiKeyApi } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
 import { copyToClipboard } from '@/lib/clipboard'
 import { useConfirm } from '@/lib/confirm-context'
 import { Button } from '@/components/ui/button'
@@ -37,23 +38,27 @@ interface CreateKeyResponse {
 function ApiKeys() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
+  const { isSuperAdmin } = useAuth()
   const [showCreate, setShowCreate] = useState(false)
   const [keyName, setKeyName] = useState('')
   const [newKeyData, setNewKeyData] = useState<CreateKeyResponse | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
 
-  // 获取 API Key 列表
+  // 获取 API Key 列表：超管看平台级代理 Key（全平台），其余身份看自己领的用户级 Key。
+  // 两条链路后端是两个端点，权限模型不同（平台能力出口 vs 绑定本人的凭据），不能混用。
   const { data: apiKeys = [], isLoading } = useQuery({
-    queryKey: ['api-keys'],
-    queryFn: () => apiKeyApi.list() as Promise<ApiKeyItem[]>,
+    queryKey: ['api-keys', isSuperAdmin],
+    queryFn: () =>
+      (isSuperAdmin ? apiKeyApi.list() : apiKeyApi.listMine()) as Promise<ApiKeyItem[]>,
   })
 
   // 创建 API Key
   const createMutation = useMutation({
-    mutationFn: (name: string) => apiKeyApi.create({ name }) as Promise<CreateKeyResponse>,
+    mutationFn: (name: string) =>
+      (isSuperAdmin ? apiKeyApi.create({ name }) : apiKeyApi.createMine({ name })) as Promise<CreateKeyResponse>,
     onSuccess: (data) => {
       setNewKeyData(data)
-      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: ['api-keys', isSuperAdmin] })
     },
   })
 
@@ -61,7 +66,7 @@ function ApiKeys() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiKeyApi.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: ['api-keys', isSuperAdmin] })
     },
   })
 
@@ -112,7 +117,11 @@ function ApiKeys() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold">API Key 管理</h2>
-          <p className="text-muted-foreground text-sm mt-1">管理 API 密钥，用于外部系统接入 Chat API。</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            {isSuperAdmin
+              ? '签发平台级代理 Key，供外部系统调用检索接口。'
+              : '为自己领一把用户级 Key（绑定本人），用于调用检索接口或维护全局法条库；撤销需联系平台管理员。'}
+          </p>
         </div>
         <Button onClick={() => setShowCreate(true)}>
           <Plus className="h-4 w-4" />
@@ -158,16 +167,20 @@ function ApiKeys() {
                   <TableCell className="text-muted-foreground text-xs">{formatTime(key.last_used_at)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => handleRevoke(key)}
-                        disabled={!key.is_active}
-                        title="撤销"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      {isSuperAdmin ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleRevoke(key)}
+                          disabled={!key.is_active}
+                          title="撤销"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">撤销请联系平台管理员</span>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
