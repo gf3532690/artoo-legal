@@ -124,35 +124,6 @@ def test_config_face_requires_auth(env):
 
 
 # ============================================================
-# 12.5 MCP 面范围收敛
-# ============================================================
-
-def test_mcp_requires_key_and_scopes(env):
-    from app.api.auth_routes import router as auth_router
-    from app.api.admin_routes import router as admin_router
-    from app.api.knowledge_base import router as kb_router
-    from app.api.api_key import router as apikey_router
-    from app.mcp_server import router as mcp_router
-
-    client = _client([auth_router, admin_router, kb_router, apikey_router, mcp_router])
-    # 无 Key 调 MCP -> 401
-    r = client.post("/mcp/tools/call", json={"name": "list_documents", "arguments": {}})
-    assert r.status_code == 401
-
-    # 建租户 + 租户级 Key（无授权范围），不指定 kb 时可读范围为空 -> list_documents 返回无文档
-    sa = _super_token(client)
-    tid, tadmin = _make_tenant_admin(client, sa, "法院A", "adm")
-    keyr = client.post("/api/api-keys", headers=_bearer(tadmin),
-                       json={"name": "k", "scope": {"all_public_kbs": False, "explicit_kb_ids": []}})
-    raw_key = keyr.json()["key"]
-    # MCP list_documents：scope 空 -> 无可读 kb -> "No documents found."
-    r = client.post("/mcp/tools/call", headers=_bearer(raw_key),
-                    json={"name": "list_documents", "arguments": {}})
-    assert r.status_code == 200
-    assert "No documents" in r.json()["content"][0]["text"]
-
-
-# ============================================================
 # 12.3 API Key 副作用与生命周期
 # ============================================================
 

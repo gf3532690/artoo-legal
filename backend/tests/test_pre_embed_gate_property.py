@@ -111,7 +111,7 @@ def _build_limits(*, kb_cap: int = 1_000_000):
 
     会话与 KB 统一使用 kb_chunk_cap（会话专属限额已废弃）。
     """
-    from app.session_upload.limits import UploadLimits
+    from app.pipeline.limits import UploadLimits
 
     return UploadLimits(
         upload_max_file_bytes=10 * 1024 * 1024,

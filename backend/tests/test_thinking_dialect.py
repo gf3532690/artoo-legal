@@ -6,7 +6,7 @@
 from app.models.llm.provider_detect import (
     LLMProviderName,
     detect_provider,
-    is_deepseek_v3_model,
+    is_deepseek_thinking_model,
     is_qwen_thinking_model,
 )
 from app.models.llm.thinking_dialect import apply_thinking
@@ -45,8 +45,8 @@ class TestModelMatchers:
         assert not is_qwen_thinking_model("qwen2.5-7b-instruct")
 
     def test_deepseek_v3(self):
-        assert is_deepseek_v3_model("deepseek-v3.1")
-        assert not is_deepseek_v3_model("deepseek-r1")
+        assert is_deepseek_thinking_model("deepseek-v3.1")
+        assert not is_deepseek_thinking_model("deepseek-r1")
 
 
 def _payload():

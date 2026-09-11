@@ -80,7 +80,7 @@ export default function Register() {
         {/* 底部品牌文案 */}
         <div className="absolute inset-x-0 bottom-0 z-10 p-12">
           <h2 className="text-4xl font-semibold leading-tight text-white">
-            用 Artoo 构建
+            用 法条库 构建
             <br />
             你的知识中枢
           </h2>
@@ -98,7 +98,7 @@ export default function Register() {
         <div className="w-full max-w-sm">
           {/* 品牌标识 */}
           <div className="mb-10 flex items-center justify-center gap-2">
-            <span className="text-2xl font-semibold font-serif tracking-tight text-foreground">Artoo</span>
+            <span className="text-2xl font-semibold font-serif tracking-tight text-foreground">法条库</span>
           </div>
 
           <div className="mb-8 text-center">
@@ -182,7 +182,7 @@ export default function Register() {
           </form>
 
           <p className="mt-12 text-center text-xs text-muted-foreground">
-            Powered by <span className="font-semibold font-serif">Artoo</span>
+            Powered by <span className="font-semibold font-serif">法条库</span>
           </p>
         </div>
       </div>

@@ -9,8 +9,6 @@ import Retrieval from './pages/Retrieval'
 import ApiKeys from './pages/ApiKeys'
 import Models from './pages/Models'
 import EmbedConfig from './pages/EmbedConfig'
-import OcrServices from './pages/OcrServices'
-import AsrServices from './pages/AsrServices'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -18,7 +16,6 @@ import ChangePassword from './pages/ChangePassword'
 import Tenants from './pages/Tenants'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
-import Invitations from './pages/Invitations'
 import InviteAccept from './pages/InviteAccept'
 import { useAuth } from './lib/auth-context'
 
@@ -39,11 +36,11 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-// 登录后默认落地页：超管为纯平台管理身份（无法条库/对话），落到"租户管理"；
-// 其余身份落到对话页。
+// 登录后默认落地页：超管为纯平台管理身份（不参与法条库内容），落到"租户管理"；
+// 租户管理员落到全局法条库的内容维护页。
 function DefaultLanding() {
   const { isSuperAdmin } = useAuth()
-  return <Navigate to={isSuperAdmin ? '/tenants' : '/chat'} replace />
+  return <Navigate to={isSuperAdmin ? '/tenants' : '/legal'} replace />
 }
 
 // 根路径入口：未登录展示炫酷落地页；已登录则按身份跳转到对应首页。
@@ -79,12 +76,9 @@ function App() {
         <Route path="retrieval" element={<Retrieval />} />
         <Route path="models" element={<Models />} />
         <Route path="embed-config" element={<EmbedConfig />} />
-        <Route path="ocr-services" element={<OcrServices />} />
-        <Route path="asr-services" element={<AsrServices />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="tenants" element={<Tenants />} />
         <Route path="users" element={<Users />} />
-        <Route path="invitations" element={<Invitations />} />
         <Route path="audit-logs" element={<AuditLogs />} />
       </Route>
     </Routes>

@@ -6,68 +6,67 @@ import {
 import Lightfall from '@/components/reactbits/Lightfall'
 import ShinyText from '@/components/reactbits/ShinyText'
 import RotatingText from '@/components/reactbits/RotatingText'
-import AgentDemo from '@/components/reactbits/AgentDemo'
 import GradientText from '@/components/reactbits/GradientText'
 import MagicBento, { type BentoCardData } from '@/components/reactbits/MagicBento'
 
-// 能力 Magic Bento 卡片数据（DeerFlow 式错落布局，4列×4行铺满）
+// 能力 Magic Bento 卡片数据（DeerFlow 式错落布局，4列×4行铺满）。
+// 仅描述本部署实际具备的能力：法条结构化入库 + 条文级语义召回。
 const BENTO_CARDS: BentoCardData[] = [
   {
-    label: 'ReAct Agent',
-    title: '真正的 ReAct Agent',
+    label: 'Retrieval',
+    title: '条文级语义召回',
     description:
-      '大模型在 Think → Act → Observe 循环中自主调用工具、分析结果、决定停止时机，而非固定流水线编排。',
+      'Dense 语义 + Sparse 稀疏 + BM25 全文并行召回，RRF 融合、Rerank 精排、MMR 去冗余、父块扩展，返回可直接引用的法条正文。',
     spanClass: 'lg:col-start-1 lg:col-span-2 lg:row-start-1',
   },
   {
-    label: 'Knowledge Graph',
-    title: '知识图谱增强检索',
+    label: 'Ingestion',
+    title: '入库即结构化',
     description:
-      '文档入库后自动用 LLM 抽取实体与关系、归一化消歧并幂等写入 Neo4j；GraphRetriever 作为第四路并入混合检索，通过实体桥接召回纯向量召不回的关联内容，并以力导向图交互浏览、钻取邻居、溯源原文。可整体开关，故障时优雅降级、不影响主链路。',
+      '上传即解析出法名与条号：按「第X条」结构感知切分，中文数字与阿拉伯数字归一，正文前缀写入「法名 第N条」供全文检索命中。',
     spanClass: 'lg:col-start-3 lg:col-span-2 lg:row-start-1 lg:row-span-2',
   },
   {
-    label: 'Retrieval',
-    title: '四路混合检索',
-    description: 'Dense 语义 + Sparse 稀疏 + BM25 全文 + Graph 图谱并行召回，RRF 融合 + Rerank 精排 + MMR 去冗余 + 父块扩展。',
+    label: 'TOC Stripping',
+    title: '目录不入库',
+    description: '自动识别并剥离「目录」区，避免章节导航文本变成可检索片段，挤占召回名额。',
     spanClass: 'lg:col-start-1 lg:row-start-2',
   },
   {
-    label: 'Evidence-First',
-    title: 'Evidence-First 纪律',
-    description: 'Progressive RAG 提示词强制"先检索、深读 chunk、再作答"，引用溯源、拒绝臆造。',
+    label: 'Two-Tier Scope',
+    title: '全局库 + 个人库',
+    description: '检索默认带上全局法条库，与调用方传入的个人库并列召回，结果标注来源，便于下游取舍。',
     spanClass: 'lg:col-start-2 lg:row-start-2',
   },
   {
-    label: 'Tools & MCP',
-    title: '可扩展工具生态',
+    label: 'Open API',
+    title: '接口即能力',
     description:
-      '内置知识检索、关键词匹配、深度阅读、附件阅读、网页搜索、思考、技能加载等工具，并支持接入远程 MCP Server，按需渐进式加载技能。',
+      '沿用知识库既有接口规范：检索走 /api/retrieval/search，内容维护走知识库与文档接口，凭 API Key 调用，不新增契约。',
     spanClass: 'lg:col-start-1 lg:col-span-2 lg:row-start-3 lg:row-span-2',
   },
   {
-    label: 'Governance',
-    title: '多租户与权限治理',
-    description: '固定角色 + 归属轴 RBAC，法条库私有 / 组织可见 + 点对点共享，图谱数据按租户与 KB 硬隔离，超级管理员、邀请注册与审计日志。',
+    label: 'Lightweight',
+    title: '轻量可私有化部署',
+    description: '单租户部署，请求路径不含任何生成式调用；只依赖外部 Embedding 与 Rerank 服务，支持内网离线运行。',
     spanClass: 'lg:col-start-3 lg:col-span-2 lg:row-start-3',
   },
   {
-    label: 'Free & Open Source',
-    title: '开源免费 · 私有可控',
+    label: 'Maintenance',
+    title: '人工可控的语料治理',
     description:
-      'MIT 协议开源，自托管、完全自主可控。所有 AI 推理通过 HTTP 调用外部服务，后端轻量，支持内网离线部署。',
+      '法条修订由管理员删除旧文件并上传新版，语料变更过程可审计、可回溯，不做自动替换。',
     spanClass: 'lg:col-start-3 lg:col-span-2 lg:row-start-4',
   },
 ]
 
 // Hero 标题轮播文案：让 法条库 ___
 const HERO_PHRASES = [
-  '自己去检索',
-  '自主编排工具',
-  '先取证据再作答',
-  '读懂你的文档',
-  '构建知识图谱',
-  '沉淀团队知识',
+  '精准定位到条文',
+  '按语义匹配法条',
+  '按法名条号直查',
+  '给出可引用的依据',
+  '沉淀统一的法条底座',
 ]
 
 // 顶部导航
@@ -111,7 +110,7 @@ export default function Landing() {
         <div className="relative z-10 mx-auto max-w-4xl text-center">
           <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm backdrop-blur-sm">
             <span className="flex h-2 w-2 rounded-full bg-[#65bd43]" />
-            <ShinyText text="开源 · MIT License · 可私有化部署" speed={4} />
+            <ShinyText text="语义检索 · 条文级定位 · 可私有化部署" speed={4} />
           </div>
 
           <h1 className="text-5xl font-semibold leading-[1.1] tracking-tight sm:text-6xl md:text-7xl">
@@ -138,10 +137,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Live Agent 演示 */}
-      <AgentDemo />
-
-      {/* 能力 + ReAct 循环（Magic Bento） */}
+      {/* 能力（Magic Bento） */}
       <section className="relative mx-auto max-w-6xl px-6 py-24">
         <div className="mb-16 text-center">
           <p className="mb-3 flex items-center justify-center gap-2 text-sm font-medium uppercase tracking-widest text-[#65bd43]">
@@ -149,7 +145,7 @@ export default function Landing() {
             Core Capabilities
           </p>
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            为可追溯问答而生的能力栈
+            为条文级召回而生的能力栈
           </h2>
         </div>
 
@@ -165,20 +161,27 @@ export default function Landing() {
         />
       </section>
 
-      {/* CTA：加入社群 */}
+      {/* CTA：进入维护后台 */}
       <section className="relative px-6 py-16">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-semibold tracking-tight sm:text-5xl">
             <GradientText animationSpeed={7} colors={['#65bd43', '#22c55e', '#3b82f6', '#65bd43']}>
-              和我们一起共建
+              把法条库接进你的业务系统
             </GradientText>
           </h2>
           <p className="mx-auto mt-6 max-w-xl text-white/55">
-            欢迎提交 Issue 与 Pull Request，分享你的想法，一起打磨更强的 Agentic RAG。每一次贡献，都在让
-            <span className="font-serif font-semibold"> 法条库 </span>
-            变得更好。
+            管理员登录后维护全局法条库的内容；业务系统凭 API Key 调用
+            <span className="font-serif font-semibold"> /api/retrieval/search </span>
+            检索全局条文与自己的个人库。
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Link
+              to="/login"
+              className="group flex items-center gap-2 rounded-[20px] bg-white px-7 py-[15px] text-sm font-medium text-black shadow-lg transition-all hover:bg-white/90"
+            >
+              登录维护后台
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </Link>
           </div>
         </div>
       </section>
@@ -191,7 +194,7 @@ export default function Landing() {
             <span>— 法条召回服务</span>
           </div>
           <div className="flex items-center gap-6">
-            <span>MIT License</span>
+            <span>基于 MIT 许可的开源项目二次开发</span>
           </div>
         </div>
       </footer>

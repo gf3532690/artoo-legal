@@ -405,8 +405,8 @@ async def _reconcile_minio_orphans() -> None:
 
 
 app = FastAPI(
-    title="Agentic RAG System",
-    description="基于 Agent 编排的 RAG 知识库系统",
+    title="法条库 · 法条召回服务",
+    description="法条结构化入库与条文级语义召回服务（不提供对话与生成能力）",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -450,4 +450,4 @@ register_exception_handlers(app)
 @app.get("/")
 async def root():
     """根路径健康检查"""
-    return {"message": "Agentic RAG System is running"}
+    return {"message": "Legal recall service is running"}

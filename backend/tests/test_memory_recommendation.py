@@ -21,8 +21,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app.session_upload import memory
-from app.session_upload.memory import (
+from app.retrieval import memory
+from app.retrieval.memory import (
     _CHUNK_BYTES,
     _CGROUP_UNLIMITED_THRESHOLD,
     _CONSERVATIVE_DEFAULT_CAP,
@@ -37,7 +37,7 @@ from app.session_upload.memory import (
     recommend_kb_chunk_cap,
 )
 
-MODULE = "app.session_upload.memory"
+MODULE = "app.retrieval.memory"
 
 # 用于内存字节生成的合理上界（约 1 PiB），避免极端值带来无意义的浮点误差
 _MAX_MEM_BYTES = 1 << 50

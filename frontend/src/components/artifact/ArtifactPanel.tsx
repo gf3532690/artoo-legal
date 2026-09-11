@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { X, Download, FileText, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { documentApi, sessionFileApi } from '@/lib/api'
+import { documentApi } from '@/lib/api'
 import { useArtifactStore, type ArtifactTarget } from '@/stores/artifactStore'
 
 // 预览引擎整体懒加载：open-file-viewer 与 pdf worker 只在首次打开面板时下载。
@@ -21,9 +21,8 @@ function PanelSpinner() {
  * Artifact 公用预览面板。
  *
  * 设计要点：
- * - 外层职责不变：右侧滑入、占用布局空间（非浮层）、统一按来源（document /
- *   session-file）带鉴权拉取原件为 blob objectURL，切换 / 卸载时 revoke，
- *   头部提供下载与关闭。
+ * - 外层职责不变：右侧滑入、占用布局空间（非浮层）、带鉴权拉取法条库文档原件为
+ *   blob objectURL，切换 / 卸载时 revoke，头部提供下载与关闭。
  * - 内层预览能力统一下放给 open-file-viewer（React 适配层）：按插件匹配渲染
  *   PDF / 图片 / 文本 / Markdown / CSV / Office / 邮件 / 压缩包等格式，
  *   本组件不再按 fileType 维护各自的预览器。
@@ -51,12 +50,8 @@ function ArtifactPanel() {
     setObjectUrl(null)
     setError(null)
 
-    const fetchRaw =
-      target.source === 'session-file' && target.sessionId
-        ? sessionFileApi.rawFile(target.sessionId, target.id)
-        : documentApi.rawFile(target.id)
-
-    fetchRaw
+    documentApi
+      .rawFile(target.id)
       .then((url) => {
         if (revoked) {
           URL.revokeObjectURL(url)

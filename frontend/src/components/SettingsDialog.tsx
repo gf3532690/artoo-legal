@@ -213,14 +213,14 @@ const RETRIEVAL_GROUPS: RetrievalGroup[] = [
   },
 ]
 
-// 上传限制档（租户级；仅 upload_max_file_mb 仍生效，会话上传与法条库上传共用）。
-// 注：会话文件数上限 / 会话累计 chunk 上限已废弃——临时文件本质 = 会话级法条库，
-// 容量统一由平台级 kb_chunk_cap 约束，不再有会话专属配额。
+// 上传限制档（租户级；仅 upload_max_file_mb 生效）。
+// 注：会话文件数上限 / 会话累计 chunk 上限已废弃——容量统一由平台级
+// kb_chunk_cap 约束，不再有会话专属配额。
 const UPLOAD_GROUPS: RetrievalGroup[] = [
   {
     title: '文件大小',
     icon: HardDrive,
-    description: '单个上传文件允许的最大体积，会话上传与法条库上传共用同一上限',
+    description: '单个上传文件允许的最大体积（法条库文档与个人库共用同一上限）',
     fields: [
       {
         key: 'upload_max_file_mb',
@@ -526,7 +526,7 @@ function RetrievalConfigSection({
     const ok = await confirm({
       title: '恢复默认值',
       description:
-        '该操作会重置全部分块（父块/子块/重叠）、召回/融合/精排/去重/索引参数与上传限制（文件大小、会话文件数、会话累计 chunk）为默认值，确定继续？',
+        '该操作会重置全部分块（父块/子块/重叠）、召回/融合/精排/去重/索引参数与上传限制（文件大小、单库 chunk 上限）为默认值，确定继续？',
       confirmText: '恢复默认',
       variant: 'destructive',
     })
@@ -657,7 +657,7 @@ function RetrievalConfigSection({
 // ============================================================
 // 平台配置（超管专属）：
 //   - Load_Cache_TTL（collection 加载缓存有效期，秒）
-//   - KB_Chunk_Cap（单库/单会话 child chunk 硬上限，约束 Milvus 常驻内存）
+//   - KB_Chunk_Cap（单库 child chunk 硬上限，约束 Milvus 常驻内存）
 // 额外展示基于运行内存的 KB_Chunk_Cap 推荐值（信息性，不自动写入；超管可点
 // 「应用建议值」回填到表单后再确认保存，Req 5.4）。
 // ============================================================
@@ -803,14 +803,14 @@ function PlatformSection() {
         </div>
       </div>
 
-      {/* 上传限制平台级（session-file-upload） */}
+      {/* 上传限制平台级 */}
       <div className="space-y-3">
         <div className="flex items-center gap-2.5">
           <Database className="h-4 w-4 text-primary shrink-0" />
           <div>
             <h3 className="text-sm font-semibold">上传限制（平台级）</h3>
             <p className="text-[11px] text-muted-foreground">
-              单库 chunk 硬上限约束 Milvus 常驻内存；会话 chunk 天花板约束共享 embedding 资源
+              单库 chunk 硬上限约束 Milvus 常驻内存
             </p>
           </div>
         </div>
@@ -844,7 +844,7 @@ function PlatformSection() {
               disabled={isLoading || !form}
             />
             <p className="text-[11px] text-muted-foreground">
-              单个法条库（含会话临时文件）允许容纳的 child chunk 总数上限，范围 [
+              单个法条库允许容纳的 child chunk 总数上限，范围 [
               {KB_CHUNK_CAP_MIN.toLocaleString()}, {KB_CHUNK_CAP_MAX.toLocaleString()}]。
             </p>
           </div>

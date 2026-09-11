@@ -380,7 +380,6 @@ function Documents({ explicitKbId }: { explicitKbId?: string } = {}) {
       id: doc.id,
       filename: doc.filename,
       fileType,
-      source: 'document',
     })
   }
 

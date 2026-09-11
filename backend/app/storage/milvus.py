@@ -706,7 +706,7 @@ class MilvusClient:
 
         schema = CollectionSchema(
             fields=_build_fields(partition_key, d),
-            description=f"Artoo 向量集合（Partition Key={partition_key}, dim={d}）",
+            description=f"法条库向量集合（Partition Key={partition_key}, dim={d}）",
             functions=[_build_bm25_function()],
         )
         create_kwargs: dict[str, Any] = {

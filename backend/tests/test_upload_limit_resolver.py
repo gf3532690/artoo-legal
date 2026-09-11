@@ -1,6 +1,6 @@
 """UploadLimitResolver 生效限制求解的属性测试
 
-被测对象：``app/session_upload/limits.py`` 的 :class:`UploadLimitResolver`。
+被测对象：``app/pipeline/limits.py`` 的 :class:`UploadLimitResolver`。
 
 求解规则（会话专属限额已废弃，临时文件 = 会话级 KB，与正式 KB 共用 chunk 上限）：
 
@@ -24,7 +24,7 @@ from app.retrieval.config import (
     PlatformConfig,
     RetrievalConfig,
 )
-from app.session_upload.limits import UploadLimitResolver, UploadLimits
+from app.pipeline.limits import UploadLimitResolver, UploadLimits
 
 _BYTES_PER_MB = 1024 * 1024
 
@@ -67,11 +67,11 @@ def _resolve_with(retrieval_cfg, platform_cfg, tenant_id):
     async def _run():
         with (
             patch(
-                "app.session_upload.limits.get_retrieval_config_store",
+                "app.pipeline.limits.get_retrieval_config_store",
                 return_value=_FakeRetrievalStore(retrieval_cfg),
             ),
             patch(
-                "app.session_upload.limits.get_platform_config_store",
+                "app.pipeline.limits.get_platform_config_store",
                 return_value=_FakePlatformStore(platform_cfg),
             ),
         ):
@@ -207,11 +207,11 @@ def test_resolve_degrades_to_defaults_on_store_failure():
     async def _run():
         with (
             patch(
-                "app.session_upload.limits.get_retrieval_config_store",
+                "app.pipeline.limits.get_retrieval_config_store",
                 return_value=_BoomRetrievalStore(),
             ),
             patch(
-                "app.session_upload.limits.get_platform_config_store",
+                "app.pipeline.limits.get_platform_config_store",
                 return_value=_BoomPlatformStore(),
             ),
         ):

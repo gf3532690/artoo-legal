@@ -49,7 +49,7 @@ function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
 
-  // 路由切换时关闭 Artifact 预览面板：预览内容（会话附件/法条库文档原件）与具体页面绑定，
+  // 路由切换时关闭 Artifact 预览面板：预览内容（法条库文档原件）与具体页面绑定，
   // 离开页面后悬浮的预览已失去上下文，应随之收起。
   const closeArtifact = useArtifactStore((s) => s.closeArtifact)
   useEffect(() => {
@@ -61,14 +61,10 @@ function Layout() {
 
   // 菜单可见性（固定角色模型，取代权限点）：
   // - Super_Admin（平台级）：平台菜单（租户管理）+ 平台能力配置（capability）+ 审计日志。
-  //   不显示租户级管理（用户/邀请）与内容菜单（超管无租户上下文、不参与内容）。
+  //   不显示租户级管理（用户）与内容菜单（超管无租户上下文、不参与内容）。
   // - admin（租户管理员）：租户管理菜单（manage，管人/管资产）+ 内容菜单（content）。
   //   不再显示能力配置（capability，已上收平台）。
   // - member（普通成员）：仅内容菜单（content）。
-  // 智能体（/agent-config）对超管开放属有意破例：MCP 服务是平台底座（仅超管可配），
-  // 而外部 MCP 工具 default-off、必须写进某个预设的 allowed_tools 才生效。若超管进不了
-  // 预设页，就出现「只有超管能接 MCP，却只有租户能配预设」的死结。超管在此建的预设
-  // tenant_id 为空 = 平台级、全租户可见（页内已明示），作为代客配置的兜底路径。
   const SUPER_ADMIN_MENUS = new Set([
     '/tenants',
     '/audit-logs',
@@ -85,12 +81,11 @@ function Layout() {
 
   // 内容与菜单一致性守卫：超管为纯平台管理身份，仅允许访问其菜单内的页面
   // （租户管理 / 审计日志）与账号自助页（改密）。系统设置/个人资料已改为账号
-  // 菜单弹窗（非路由），不在此列。直接命中法条库/对话等页面时，重定向回
+  // 菜单弹窗（非路由），不在此列。直接命中法条库等页面时，重定向回
   // "租户管理"，避免出现"左侧无此菜单、右侧却是法条库内容"的错位。
   // 注意：置于所有 hook 调用之后，避免条件式调用 hook。
-  // 超管可访问：平台菜单（租户管理/审计日志）、平台能力配置（模型/Embedding/OCR/检索测试/
-  // API Key，capability-config-to-platform）、智能体预设（代客配置 MCP 工具，见
-  // SUPER_ADMIN_MENUS 处说明）、账号自助页（改密）。
+  // 超管可访问：平台菜单（租户管理/审计日志）、平台能力配置（Embedding/检索测试/
+  // API Key，capability-config-to-platform）、账号自助页（改密）。
   const SUPER_ADMIN_ALLOWED_PATHS = new Set([
     '/tenants',
     '/audit-logs',

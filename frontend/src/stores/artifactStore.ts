@@ -3,25 +3,18 @@ import { create } from 'zustand'
 /**
  * Artifact 面板全局状态。
  *
- * Artifact 是承载不同类型文件预览的公用侧栏：从右侧滑入、占用布局空间（非浮层）。
- * 通过全局 store 暴露 open/close，任意页面（法条库文档、会话附件等）都能触发预览，
- * 而无需层层透传 props，保持数据流清晰。
+ * Artifact 是承载法条库文档预览的公用侧栏：从右侧滑入、占用布局空间（非浮层）。
+ * 通过全局 store 暴露 open/close，任意页面都能触发预览，而无需层层透传 props，
+ * 保持数据流清晰。
  */
 
-/** 预览来源：法条库文档 / 会话附件。决定取原件的接口。 */
-export type ArtifactSource = 'document' | 'session-file'
-
 export interface ArtifactTarget {
-  /** 文档 / 会话文件 ID */
+  /** 文档 ID */
   id: string
   /** 原始文件名（用于标题与下载名） */
   filename: string
   /** 文件类型扩展名（小写，无点），如 pdf / docx */
   fileType: string
-  /** 预览来源 */
-  source: ArtifactSource
-  /** session-file 来源时必填：所属会话 ID */
-  sessionId?: string
 }
 
 interface ArtifactState {
