@@ -223,6 +223,13 @@ def _build_fields(partition_key: str, dim: int) -> list[FieldSchema]:
         # scalar 字段，用于 pre-filter 过滤检索
         FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=20),
         FieldSchema(name="element_type", dtype=DataType.VARCHAR, max_length=20),
+        # 法条过滤字段（PRD 的"按效力层级 / 按省份城市"过滤依赖它们）。
+        # 必须在**首次入库前**就存在于 schema：Milvus 没有"只更新某个标量字段"的接口，
+        # 事后补值等于把每个 chunk 重新 embedding。max_length 是**字节**，
+        # law_type 最长取值「有关法律问题和重大问题的决定（部分）」约 58 字节。
+        FieldSchema(name="law_type", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="province", dtype=DataType.VARCHAR, max_length=32),
+        FieldSchema(name="city", dtype=DataType.VARCHAR, max_length=32),
     ]
 
 
@@ -243,6 +250,10 @@ _SCALAR_INDEXES = {
     "tenant_id": "idx_tenant_id",    # 按租户统计 / 批量清理
     "file_type": "idx_file_type",
     "element_type": "idx_element_type",
+    # 法条过滤（见 _build_fields 的说明）：层级 / 地域筛选走 expr 过滤。
+    "law_type": "idx_law_type",
+    "province": "idx_province",
+    "city": "idx_city",
 }
 
 # ------------------------------------------------------------------

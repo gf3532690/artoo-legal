@@ -181,6 +181,12 @@ async def _default_legal_tenant_bootstrap(session: AsyncSession) -> None:
                 description="全租户唯一的法条库；由租户管理员维护，检索时默认并入。",
                 config={
                     "chunker_type": "laws",
+                    # 容量方案（首次入库前定）：子块粒度取「一条文一子块」，超长条文由
+                    # enforce_size_limits 按句子再切。全量 1.19 M chunk（现状按款切是 2.88 M），
+                    # 配合版本选版约 0.82 M，落在 kb_chunk_cap（1e6）以内。
+                    # 见 docs/legal-first-ingest-checklist.md 与
+                    # .agents/notes/proposed/architecture/2026-09-14-legal-child-chunk-granularity.md
+                    "law_child_policy": "article",
                     DEFAULT_LEGAL_KB_FLAG: True,
                 },
                 doc_count=0,

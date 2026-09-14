@@ -36,6 +36,7 @@ from app.pipeline.loader import EmbeddedImage, LoadResult, get_loader
 from app.pipeline.logging import PipelineLogger
 from app.pipeline.context_embedder import ContextualEmbedder
 from app.pipeline.metadata import ChunkMetadata, MetadataExtractor
+from app.pipeline.docx_meta import extract_docx_props
 from app.pipeline.legal_metadata import (
     LegalMetadataExtractor,
     analyze_legal_document,
@@ -348,8 +349,21 @@ class DocumentPipeline:
             # ─── 3.3 法条文档级预处理（目录剥离 + 法名解析） ───
             # 必须在切分之前：目录行一旦被切成 chunk 并写入索引，就再也剥不掉了。
             # 对非法条语料这是 no-op——没有独立成行的「目录」标记就不动文本。
+            # 文档级字段先取 docx 内嵌属性（权威来源），逐字段回退到正文解析：
+            # 正文解析是启发式，语料实测 9.9% 标题跨行、12.8% 没有可解析的日期行。
             # 设计依据见 docs/legal-recall-implementation-plan.md 的 D10 / D13。
-            legal_analysis = analyze_legal_document(final_content)
+            docx_props = (
+                await asyncio.to_thread(extract_docx_props, file_path)
+                if ext.lower() == "docx"
+                else None
+            )
+            legal_analysis = analyze_legal_document(final_content, props=docx_props)
+            if docx_props is not None:
+                logger.info(
+                    "[%s=%s] 法条文档：元数据来源=%s（origin=%s，法名=%r）",
+                    source_kind, source_id, legal_analysis.header.meta_source,
+                    docx_props.origin, legal_analysis.header.law_name,
+                )
             if legal_analysis.header.toc_stripped:
                 logger.info(
                     "[%s=%s] 法条文档：已剥离目录区，法名=%r",
@@ -740,6 +754,11 @@ class DocumentPipeline:
                         "chunk_index": child_idx,
                         "file_type": meta.file_type,
                         "element_type": meta.element_type,
+                        # 法条过滤字段：与 schema 中的同名字段一一对应。取不到就写空串
+                        # （Milvus VARCHAR 不接受 None）。过滤时按值匹配，空值即"不命中"。
+                        "law_type": (legal or {}).get("law_type") or "",
+                        "province": (legal or {}).get("province") or "",
+                        "city": (legal or {}).get("city") or "",
                         # 租户维度（不参与鉴权，鉴权在 PG 侧 kb_authz 完成）：仅供运维排障
                         # 与将来按租户批量统计/清理。kb_id / session_id 两个 Partition Key
                         # 字段由 MilvusClient._stamp_records 统一兜底，此处不重复。
@@ -948,6 +967,12 @@ class DocumentPipeline:
             try:
                 # 只有 naive 类型接受 chunk 参数，其他类型不传
                 kwargs = chunk_kwargs if chunker_type == "naive" else {}
+                if chunker_type == "laws":
+                    # 法条子块粒度（KB config 的 law_child_policy）：不设即保持现状
+                    # （按段落/款切）。容量对比见 docs/legal-recall-implementation-plan.md 2.1。
+                    policy = kb.config.get("law_child_policy") if isinstance(kb.config, dict) else None
+                    if policy:
+                        kwargs = {"child_policy": policy}
                 return ChunkerFactory.create(chunker_type, **kwargs)
             except (ValueError, TypeError):
                 logger.warning(

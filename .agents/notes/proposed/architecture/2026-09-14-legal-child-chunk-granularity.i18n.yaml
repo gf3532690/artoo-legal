@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/proposed/architecture/2026-09-14-legal-child-chunk-granularity.md .agents/notes/proposed/architecture/2026-09-14-legal-child-chunk-granularity.zh.md
+2026-09-14-legal-child-chunk-granularity.md: 9be28233a877e5006a242d6f05148e23840306f9
+2026-09-14-legal-child-chunk-granularity.zh.md: 6c842396742683dee0da76ed18b4f2ebfee19c77

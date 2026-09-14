@@ -6,11 +6,14 @@
 适用于：法律法规、判决书、裁定书等法律文书。
 """
 
+import logging
 import re
 
 from app.pipeline.chunker import ChunkResult
 from app.pipeline.chunker_router import BaseChunker, ChunkerFactory
 from app.pipeline.legal_terms import ARTICLE_LINE_PATTERN, ITEM_LINE_PATTERN
+
+logger = logging.getLogger(__name__)
 
 
 # 法律文书结构分割正则：第X条、本院认为、判决如下、经审理查明等
@@ -32,8 +35,26 @@ class LawsChunker(BaseChunker):
 
     切分策略：
     - 父块：按条款编号（第X条）和判决结构关键词切分
-    - 子块：每个父块内按段落（双换行或单换行非空行）切分
+    - 子块：由 ``child_policy`` 决定，见 :attr:`POLICIES`
     """
+
+    # 子块粒度策略（KB config 的 ``law_child_policy``）：
+    # - ``paragraph``（默认，即改造前行为）：父块内按段落切子块，款成为独立检索单元，
+    #   粒度最细；语料实测每条条文平均产出 2.43 个子块。
+    # - ``article``：一条文一个子块，超过 ``child_size`` 的由 ``enforce_size_limits``
+    #   按句子边界再切。体量约为前者的 41%（全量 2.88 M → 1.19 M child chunk）。
+    # 取舍依据、实测数字与尚未完成的检索质量对比见
+    # ``docs/legal-recall-implementation-plan.md`` 2.1 节。
+    POLICIES = ("paragraph", "article")
+
+    def __init__(self, child_policy: str = "paragraph"):
+        if child_policy not in self.POLICIES:
+            logger.warning(
+                "未知的 law_child_policy=%r，回退到 'paragraph'（可选: %s）",
+                child_policy, ", ".join(self.POLICIES),
+            )
+            child_policy = "paragraph"
+        self.child_policy = child_policy
 
     def chunk(self, text: str, metadata: dict | None = None) -> ChunkResult:
         """将法律文书切分为父子 chunk
@@ -70,7 +91,7 @@ class LawsChunker(BaseChunker):
         parent_child_map: dict[int, list[int]] = {}
 
         for parent_idx, parent_text in enumerate(parent_chunks):
-            children = self._split_into_paragraphs(parent_text)
+            children = self._split_children(parent_text)
             child_indices = []
             for child_text in children:
                 child_indices.append(len(child_chunks))
@@ -82,6 +103,13 @@ class LawsChunker(BaseChunker):
             child_chunks=child_chunks,
             parent_child_map=parent_child_map,
         )
+
+    def _split_children(self, text: str) -> list[str]:
+        """按 ``child_policy`` 产出父块内的子块。"""
+        if self.child_policy == "article":
+            stripped = text.strip()
+            return [stripped] if stripped else []
+        return self._split_into_paragraphs(text)
 
     def _split_by_pattern(self, text: str, pattern: re.Pattern[str]) -> list[str]:
         """按给定结构标记切分为父块
