@@ -405,7 +405,24 @@ async def _build_result_items(
                     chunk_legal[row.id] = row.chunk_metadata
 
     # 法条字段放进已有的 metadata 槽位，不新增顶层字段（响应模型保持不变）。
-    _LEGAL_KEYS = ("law_name", "article_number", "article_label", "chapter")
+    #
+    # 这里下发的是 PRD《法条检索基础API》要的产品字段：结果要带"效力层级"
+    # （law_type）供调用方筛选与展示，要带发布/施行日期与时效状态供判断新旧，
+    # 要带地域供地方性法规的展示与核对。数据早已在 chunk_metadata 里
+    # （见 docs/legal-recall-implementation-plan.md §6.1），此处只是把它们露出来。
+    _LEGAL_KEYS = (
+        "law_name",
+        "article_number",
+        "article_label",
+        "chapter",
+        "law_type",
+        "issuing_authority",
+        "publish_date",
+        "effective_date",
+        "validity_status",
+        "province",
+        "city",
+    )
     global_set = set(global_kb_ids or [])
 
     items: list[RetrievalResultItem] = []
@@ -419,6 +436,12 @@ async def _build_result_items(
             value = legal_raw.get(key)
             if value is not None:
                 metadata[key] = value
+
+        # 法条 ID：由「文档 + 条号」派生，供调用方按法条取详情/去重，不需要额外入库字段。
+        # 无条号的文档（修正案 / 决定类）不给，而不是给一个会撞车的假 ID。
+        article_number = legal_raw.get("article_number")
+        if article_number is not None:
+            metadata["article_id"] = f"{r.doc_id}:{article_number}"
 
         # 来源标记：命中全局法条库为 global，其余（个人库 / 会话附件）为 personal。
         # 只在解析到全局库时才标注，避免非法条部署凭空多出该字段。

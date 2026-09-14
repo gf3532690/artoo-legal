@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/architecture/2026-09-14-legal-version-provenance-fields.md .agents/notes/implemented/architecture/2026-09-14-legal-version-provenance-fields.zh.md
-2026-09-14-legal-version-provenance-fields.md: 1ab7b5ef4008a1a117c2f0bc3b59fb5895f2cbaf
+2026-09-14-legal-version-provenance-fields.md: f40b79a2cbb5188ed938333bdefeeb8770bf3d2b
 2026-09-14-legal-version-provenance-fields.zh.md: ce64f0cf0c2a2e70c74e78cae9228bc7add9b8a1

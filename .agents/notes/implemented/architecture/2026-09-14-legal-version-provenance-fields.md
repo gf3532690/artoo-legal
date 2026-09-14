@@ -42,9 +42,12 @@ new keys per child chunk: those five plus `meta_source`.
   authoritative values from heuristic ones.
 
 The keys reach PostgreSQL through the existing `Chunk.chunk_metadata` JSON column
-— no migration — and Milvus is untouched, consistent with D1. Nothing new is
-exposed on the wire: `api/retrieval.py::_LEGAL_KEYS` still selects only
-`law_name` / `article_number` / `article_label` / `chapter`.
+— no migration. At the time of this change nothing was exposed on the wire
+(`_LEGAL_KEYS` selected only `law_name` / `article_number` / `article_label` /
+`chapter`); they are now returned to callers as well, recorded in
+[Legal result metadata exposure](2026-09-14-legal-result-metadata-exposure.md),
+and `law_type` / `province` / `city` are also Milvus scalar fields (see the
+filter-scalars proposal).
 
 ## Alternatives considered
 

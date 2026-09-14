@@ -579,9 +579,13 @@ Rerank 环境可跑对比。决策与 A/B 步骤见
 **法条文本的通过日**，属性值是**该文件所载版本**的日期，抽样 300 份里 196 份因此
 不同；要按版本排序时以属性值为准。
 
-**不下发**：以上字段全部只落 PG `chunk_metadata`，检索响应仍只返回
-`law_name` / `article_number` / `article_label` / `chapter`（`api/retrieval.py`
-的 `_LEGAL_KEYS`）。要下发必须同步 `artoo-open-api.md` 与前端类型。
+**下发口径（2026-09-14 变更）**：原先这些字段只落 PG `chunk_metadata`、不下发；PRD
+《法条检索基础API》要求结果带"效力层级"等信息，因此 `api/retrieval.py` 的
+`_LEGAL_KEYS` 已扩到 `law_name` / `article_number` / `article_label` / `chapter` /
+`law_type` / `issuing_authority` / `publish_date` / `effective_date` /
+`validity_status` / `province` / `city`，并派生 `article_id`（`doc_id:条号`）。
+取不到的字段**整键缺失**（既有约定）。`artoo-open-api.md` 第 0 节已同步；决策记录见
+`.agents/notes/implemented/architecture/2026-09-14-legal-result-metadata-exposure.md`。
 
 时效性字段的现状：`effective_date` 与 `validity_status` 已随本表落库；
 `legal_status` / `expiry_date` / `superseded_by` 仍然暂缓（语料里没有对应数据），

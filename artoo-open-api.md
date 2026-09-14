@@ -20,7 +20,7 @@
 | 1 | **检索默认带上「全局法条库」** | `POST /api/retrieval/search` 会把调用方传入的 `kb_ids` 与全局法条库自动合并检索；**即使不传任何检索范围也会返回该库结果**（上游此处返回 `400`） |
 | 2 | **`top_k` 默认值为 5** | 字段名不变，仅本部署默认值由 `10` 调为 `5` |
 | 3 | **不再支持 `session_id`** | 会话附件链路随非召回链路一并移除；相关章节标为「本部署未启用」 |
-| 4 | **结果 `metadata` 追加法条字段** | `law_name`、`article_number`、`article_label`、`chapter`、`source`（取值 `global` / `personal`） |
+| 4 | **结果 `metadata` 追加法条字段** | 身份与结构：`law_name`、`article_number`、`article_label`、`chapter`、`article_id`（`doc_id:条号`，无条号的文档不给）；效力与时间：`law_type`、`issuing_authority`、`publish_date`、`effective_date`、`validity_status`；地域：`province`、`city`；来源：`source`（取值 `global` / `personal`）。**取不到的字段整键缺失**（不是 `null`），客户端需按可空处理 |
 | 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
 | 6 | **代理 Key 的外部用户落在默认租户** | 1.2 / 1.3 的代理 Key 通道在本部署**可用**，但外部用户不再落在内置「外部用户租户」，而是落在默认租户（配置 `EXTERNAL_USER_TENANT_ID`），否则跨租户读不到全局法条库。另提供更适合单身份接入的「用户级 Key」。两种方式详见 2.0 |
 
