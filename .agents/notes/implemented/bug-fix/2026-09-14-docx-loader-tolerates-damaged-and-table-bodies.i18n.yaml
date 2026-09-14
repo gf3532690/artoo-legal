@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/bug-fix/2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.md .agents/notes/implemented/bug-fix/2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.zh.md
+2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.md: 0fb6d0d3c167a0d71ac2a0986e3b0e064e99605e
+2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.zh.md: 26483a54d27005811e02bc5a23974f7a209a1968
