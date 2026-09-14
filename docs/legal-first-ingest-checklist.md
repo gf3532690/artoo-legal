@@ -65,11 +65,17 @@ PG 侧宽松得多：`chunk_metadata` 是 JSON 列，加键不需要迁移，值
 ## 五、执行参数（记录，便于复现）
 
 - [ ] 语料来源形态：解压目录（文件名正常）或原始 zip（条目名是 cp437 误读，需要还原）。
-- [ ] 入库方式：`POST /api/knowledge-bases/{kb_id}/documents/upload-folder` 分批，
-      还是脚本直连 pipeline。
-- [ ] 分批大小与并发（`Pre_Embed_Gate` 按 `kb_chunk_cap` 判，超限会拦下整批）。
-- [ ] 对账基线：`app/scripts/audit_legal_metadata.py` 产出的 `files.csv` / `groups.csv`
-      作为入库前快照，入库后逐份比对。
+- [x] **入库方式：`POST /api/knowledge-bases/{kb_id}/documents/upload-folder` 分批上传**，
+      由 `app/scripts/ingest_legal_corpus.py` 执行（默认每批 20 份；上传接口逐文件建
+      Document 行并入队，批更大只是队列更长）。服务端按 `file_hash` 去重，脚本另存
+      `--state` 记录已提交文件名，可断点续跑。
+- [x] 预检已就绪：`--dry-run` 校验文件存在、扩展名、体积上限与**服务端文件名校验规则**
+      （直接复用 `app.api.validators`，避免规则漂移）。全量清单 22,036 份预检通过：
+      可用 22,036、问题 0。
+- [ ] 分批大小与并发（`Pre_Embed_Gate` 按 `kb_chunk_cap` 判，超限会拦下整批；
+      本方案估算 0.82 M < 1.0 M，但首轮建议先用 `--limit` 小批试跑核对估算）。
+- [ ] 对账基线：`audit_legal_metadata.py` 产出的 `files.csv` / `groups.csv` 作为入库前快照，
+      入库后跑 `ingest_legal_corpus.py --verify` 逐份比对。
 
 ## 六、明确**不在**本 gate 内（可随时迭代）
 
