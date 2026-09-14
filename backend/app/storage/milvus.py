@@ -173,6 +173,10 @@ _OUTPUT_FIELDS = [
     "chunk_index",
     "file_type",
     "element_type",
+    # 法条排序/展示用：law_type 供位阶加权，province 用于区分国家/地方的废止决定。
+    # 只影响查询投影，不影响 schema（字段本身已在 _build_fields 里）。
+    "law_type",
+    "province",
 ]
 
 
@@ -225,11 +229,11 @@ def _build_fields(partition_key: str, dim: int) -> list[FieldSchema]:
         FieldSchema(name="element_type", dtype=DataType.VARCHAR, max_length=20),
         # 法条过滤字段（PRD 的"按效力层级 / 按省份城市"过滤依赖它们）。
         # 必须在**首次入库前**就存在于 schema：Milvus 没有"只更新某个标量字段"的接口，
-        # 事后补值等于把每个 chunk 重新 embedding。max_length 是**字节**，
-        # law_type 最长取值「有关法律问题和重大问题的决定（部分）」约 58 字节。
-        FieldSchema(name="law_type", dtype=DataType.VARCHAR, max_length=64),
-        FieldSchema(name="province", dtype=DataType.VARCHAR, max_length=32),
-        FieldSchema(name="city", dtype=DataType.VARCHAR, max_length=32),
+        # 事后补值等于把每个 chunk 重新 embedding。长度上限见 LEGAL_FILTER_FIELD_LENGTHS。
+        *[
+            FieldSchema(name=name, dtype=DataType.VARCHAR, max_length=length)
+            for name, length in LEGAL_FILTER_FIELD_LENGTHS.items()
+        ],
     ]
 
 
@@ -254,6 +258,15 @@ _SCALAR_INDEXES = {
     "law_type": "idx_law_type",
     "province": "idx_province",
     "city": "idx_city",
+}
+
+# 法条过滤字段与长度上限（Milvus VARCHAR 的 max_length 是**字节**数）。
+# 单独成常量有两个好处：`_build_fields` 与标量索引共用同一处定义；核对清单里
+# "首次入库前 schema 必须带这些字段"这条可以在没有真实 pymilvus 的环境里被断言。
+LEGAL_FILTER_FIELD_LENGTHS: dict[str, int] = {
+    "law_type": 64,  # 最长取值「有关法律问题和重大问题的决定（部分）」约 58 字节
+    "province": 32,  # 最长「新疆维吾尔自治区」24 字节
+    "city": 32,
 }
 
 # ------------------------------------------------------------------

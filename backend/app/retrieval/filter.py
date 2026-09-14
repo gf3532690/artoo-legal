@@ -17,41 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# 对外暴露的效力层级 → 语料 ``law_type`` 取值集合。
-#
-# 口径说明：
-# - ``law`` 只含国家法律层级的法条本身与法律解释/修正案；
-# - ``decision`` 单列：修改、废止的决定既可能是国家层面（全国人大常委会）也可能是
-#   地方层面（省市人大），语料只给了类别、没给层级，因此不强行归入 ``law``；
-# - ``supervision_regulation``（监察法规）按《立法法》单列，不并入行政法规。
-LEGAL_LEVEL_TYPES: dict[str, tuple[str, ...]] = {
-    "constitution": ("宪法",),
-    "law": (
-        "法律",
-        "法律解释",
-        "修正案",
-        "法规性决定",
-        "有关法律问题和重大问题的决定（部分）",
-    ),
-    "decision": ("修改、废止的决定",),
-    "administrative_regulation": ("行政法规",),
-    "judicial_interpretation": ("司法解释",),
-    "local_regulation": ("地方法规",),
-    "supervision_regulation": ("监察法规",),
-}
+# 层级词汇表集中在 retrieval/legal_level.py：过滤与排序共用一处定义。
+from app.retrieval.legal_level import LEGAL_LEVEL_TYPES, law_types_for_levels
 
-
-def law_types_for_levels(levels: list[str] | None) -> list[str]:
-    """把层级名展开成语料 ``law_type`` 取值列表；未知层级直接忽略（不报错）。
-
-    服务端不因为一个拼错的层级名就让整次检索失败——与"取不到的过滤字段不命中"一致。
-    """
-    if not levels:
-        return []
-    types: list[str] = []
-    for level in levels:
-        types.extend(LEGAL_LEVEL_TYPES.get(level, ()))
-    return list(dict.fromkeys(types))
+__all__ = ["LEGAL_LEVEL_TYPES", "RetrievalFilter", "law_types_for_levels"]
 
 
 def _quote(value: str) -> str:

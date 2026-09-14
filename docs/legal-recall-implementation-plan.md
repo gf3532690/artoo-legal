@@ -647,6 +647,7 @@ Rerank 环境可跑对比。决策与 A/B 步骤见
 | `recall_k` / `rerank_candidate_k` | 128 / 50 | 不改 | 通用值 |
 | `rrf_k` | 60 | 不改 | 通用最优 |
 | `composite_rerank_weight` / `_base_weight` / `_source_weight` | 0.6 / 0.3 / 0.1 | 不改 | |
+| `legal_level_weight` | 无此参数 | **新增 0.1** | 效力位阶加权（PRD 要求未指定层级时法律层级排在司法解释之前）；`0` = 关闭，只对带 `law_type` 的法条结果生效 |
 | `rerank_threshold` / `threshold_degradation_enabled` | 0.2 / true | **实际不生效** | 检索接口传 `apply_rerank_filter=False`，软阈值本就跳过；无需改值 |
 | `rerank_top_k` | 10 | 不改 | |
 | `mmr_lambda` / `mmr_threshold` | 0.7 / 0.7 | 不改 | |

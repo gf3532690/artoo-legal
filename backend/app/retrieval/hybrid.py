@@ -19,6 +19,7 @@ from app.models.provider import RerankProvider
 from app.repositories.tenant_repo import current_tenant_scope
 from app.retrieval.base import BaseRetriever, RetrievalResult
 from app.retrieval.log_safety import sanitize_for_log
+from app.retrieval.legal_level import level_tier
 from app.retrieval.textutil import jaccard as _jaccard_word_sets
 from app.retrieval.textutil import tokenize as _tokenize
 from app.retrieval.config import (
@@ -744,8 +745,16 @@ class HybridRetriever(BaseRetriever):
         if config is None:
             config = RetrievalConfig()
 
+        # 效力位阶加权：PRD 的"未指定层级时高层级优先"。权重为 0 时完全不介入——
+        # 既保证非法条语料（没有 law_type）行为不变，也让关闭加权时逐字节回到旧行为。
+        level_weight = getattr(config, "legal_level_weight", 0.0) or 0.0
+        # 加权必须在 reranker 返回结果**之前**决定要取多少条：reranker 自己按分数截断，
+        # 只取 top_k 的话，排在第 k+1 名的法律层级永远进不来。多取一倍再自己收敛，
+        # 对 reranker 的算力没有影响（它对所有候选都打分，只是返回条数不同）。
+        fetch_k = top_k if level_weight <= 0 else min(len(results), max(top_k * 2, top_k + 5))
+
         documents = [r.content for r in results]
-        ranked_pairs = await self.reranker.rerank(query, documents, top_k=top_k)
+        ranked_pairs = await self.reranker.rerank(query, documents, top_k=fetch_k)
 
         # 打印分数分布用于调试
         if ranked_pairs:
@@ -759,6 +768,14 @@ class HybridRetriever(BaseRetriever):
             # 对结构性碎片施加惩罚
             if self._is_structural_fragment(item.content):
                 score = score * 0.5
+            # 位阶加权：分数乘 (1 + w * 位阶分)。取不到位阶（非条文元数据）时不动。
+            if level_weight > 0:
+                tier = level_tier(
+                    (item.metadata or {}).get("law_type"),
+                    (item.metadata or {}).get("province"),
+                )
+                if tier is not None:
+                    score = score * (1.0 + level_weight * tier)
             reranked.append(
                 RetrievalResult(
                     chunk_id=item.chunk_id,
@@ -771,6 +788,10 @@ class HybridRetriever(BaseRetriever):
 
         # 惩罚后重新排序（rerank 原始分数降序）
         reranked.sort(key=lambda x: x.score, reverse=True)
+
+        # 加成后自己收敛到 top_k：上面为了给位阶留出上升空间而多取了候选。
+        if len(reranked) > top_k:
+            reranked = reranked[:top_k]
 
         # 软阈值过滤 + 多重兜底（B2）：作用在 rerank 原始分数上，返回前统一应用。
         # 纯检索召回接口传 apply_filter=False 跳过此过滤，直接返回 rerank 排序结果。

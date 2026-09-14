@@ -43,6 +43,8 @@ EXPECTED_SPECS = {
     "composite_rerank_weight": (0.6, 0.0, 1.0, KIND_FLOAT),
     "composite_base_weight": (0.3, 0.0, 1.0, KIND_FLOAT),
     "composite_source_weight": (0.1, 0.0, 1.0, KIND_FLOAT),
+    # 融合档新增：效力位阶权重（legal-recall）。仅对带 law_type 的法条语料生效。
+    "legal_level_weight": (0.1, 0.0, 1.0, KIND_FLOAT),
     "rerank_threshold": (0.2, 0.0, 1.0, KIND_FLOAT),
     "rerank_top_k": (10, 1, 100, KIND_INT),
     "threshold_degradation_enabled": (True, None, None, KIND_BOOL),

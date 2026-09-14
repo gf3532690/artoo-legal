@@ -75,6 +75,7 @@ class RetrievalConfigSection(BaseModel):
     composite_rerank_weight: float
     composite_base_weight: float
     composite_source_weight: float
+    legal_level_weight: float  # 效力位阶权重（0 = 关闭；法条库默认 0.1）
     # 精排档 Rerank_Tier
     rerank_threshold: float
     rerank_top_k: int
@@ -114,6 +115,7 @@ class RetrievalConfigUpdate(BaseModel):
     composite_rerank_weight: float | None = None
     composite_base_weight: float | None = None
     composite_source_weight: float | None = None
+    legal_level_weight: float | None = None  # 效力位阶权重（0 = 关闭）
     # 精排档 Rerank_Tier
     rerank_threshold: float | None = None
     rerank_top_k: int | None = None

@@ -137,6 +137,8 @@ async def _migrate_db() -> None:
         # 注：会话专属限额（session_max_files / session_chunk_cap / session_chunk_ceiling）已废弃，
         # 临时文件统一由 kb_chunk_cap 约束，不再补这些列（存量库残留列保持 nullable、不被读取）。
         "ALTER TABLE retrieval_configs ADD COLUMN upload_max_file_mb INTEGER",
+        # 法条库：效力位阶权重（legal-recall）。nullable，缺失由 effective_from_raw 兜底默认值。
+        "ALTER TABLE retrieval_configs ADD COLUMN legal_level_weight DOUBLE PRECISION",
         "ALTER TABLE platform_configs ADD COLUMN kb_chunk_cap INTEGER",
 
         # 知识图谱（knowledge-graph）：平台级抗压参数列。模型为 nullable，

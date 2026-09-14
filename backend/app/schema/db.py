@@ -296,6 +296,8 @@ class RetrievalConfigRow(Base):
     composite_rerank_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     composite_base_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     composite_source_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # 效力位阶权重（legal-recall）：0 = 关闭位阶偏好；仅对带 law_type 的法条语料生效。
+    legal_level_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # 精排档 Rerank_Tier
     rerank_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rerank_top_k: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

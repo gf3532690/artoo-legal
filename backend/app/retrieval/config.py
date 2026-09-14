@@ -69,6 +69,9 @@ RETRIEVAL_FIELD_SPECS: dict[str, FieldSpec] = {
     "composite_rerank_weight": FieldSpec(default=0.6, lo=0.0, hi=1.0, kind=KIND_FLOAT),
     "composite_base_weight": FieldSpec(default=0.3, lo=0.0, hi=1.0, kind=KIND_FLOAT),
     "composite_source_weight": FieldSpec(default=0.1, lo=0.0, hi=1.0, kind=KIND_FLOAT),
+    # 效力位阶权重：0 = 关闭（结果完全按相关度）；默认 0.1 表示位阶分每高 0.1，
+    # 分数最多上浮 1%（见 hybrid._rerank 的加权公式），用于"综合排序"里的位阶偏好。
+    "legal_level_weight": FieldSpec(default=0.1, lo=0.0, hi=1.0, kind=KIND_FLOAT),
     # 精排档 Rerank_Tier
     "rerank_threshold": FieldSpec(default=0.2, lo=0.0, hi=1.0, kind=KIND_FLOAT),
     "rerank_top_k": FieldSpec(default=10, lo=1, hi=100, kind=KIND_INT),
@@ -157,6 +160,7 @@ class RetrievalConfig(BaseModel):
     composite_rerank_weight: float = RETRIEVAL_FIELD_SPECS["composite_rerank_weight"].default
     composite_base_weight: float = RETRIEVAL_FIELD_SPECS["composite_base_weight"].default
     composite_source_weight: float = RETRIEVAL_FIELD_SPECS["composite_source_weight"].default
+    legal_level_weight: float = RETRIEVAL_FIELD_SPECS["legal_level_weight"].default
     # 精排档
     rerank_threshold: float = RETRIEVAL_FIELD_SPECS["rerank_threshold"].default
     rerank_top_k: int = RETRIEVAL_FIELD_SPECS["rerank_top_k"].default

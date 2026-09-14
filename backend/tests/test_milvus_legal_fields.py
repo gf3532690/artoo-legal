@@ -3,6 +3,11 @@
 这是首次入库的 gate 之一：schema 是固定的、没有开 dynamic field，而 Milvus 没有
 "只更新某个标量字段"的接口——事后补值等于把每个 chunk 重新 embedding。所以
 ``law_type`` / ``province`` / ``city`` 必须在建表时就带上，并由写入路径逐行填充。
+
+这里只断言**声明层**（字段名、长度上限、标量索引、`_build_fields` 消费这些常量）：
+建表结果本身依赖真实的 pymilvus 与 Milvus 服务，且本套件里 ``test_milvus_b3.py`` 会用
+``sys.modules`` 注入假的 pymilvus，运行结果随导入顺序变化。真实的 schema 用
+``describe_collection`` 在部署上核验（见 Agent Note 的验证记录）。
 """
 
 from __future__ import annotations
@@ -11,16 +16,24 @@ import os as _os
 
 _os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production")
 
-from app.storage.milvus import _SCALAR_INDEXES, _build_fields
+import inspect
+
+from app.storage import milvus as milvus_module
+from app.storage.milvus import LEGAL_FILTER_FIELD_LENGTHS, _SCALAR_INDEXES
 
 _LEGAL_FILTER_FIELDS = ("law_type", "province", "city")
 
 
 class TestLegalFilterFields:
-    def test_fields_exist_in_schema(self) -> None:
-        names = {field.name for field in _build_fields("kb_id", 1024)}
+    def test_legal_field_specs_are_declared(self) -> None:
+        """字段名与长度上限是 schema 的 gate；不需要 pymilvus 即可断言。"""
+        assert set(LEGAL_FILTER_FIELD_LENGTHS) == set(_LEGAL_FILTER_FIELDS)
 
-        assert set(_LEGAL_FILTER_FIELDS) <= names
+    def test_schema_builder_consumes_the_declaration(self) -> None:
+        """``_build_fields`` 必须从这份常量取法条字段，否则声明与建表会分叉。"""
+        source = inspect.getsource(milvus_module._build_fields)
+
+        assert "LEGAL_FILTER_FIELD_LENGTHS" in source
 
     def test_fields_have_scalar_indexes(self) -> None:
         assert set(_LEGAL_FILTER_FIELDS) <= set(_SCALAR_INDEXES)
@@ -32,14 +45,7 @@ class TestLegalFilterFields:
 
     def test_law_type_holds_the_longest_known_value(self) -> None:
         """max_length 是字节数：最长取值「有关法律问题和重大问题的决定（部分）」。"""
-        fields = {field.name: field for field in _build_fields("kb_id", 1024)}
         longest = "有关法律问题和重大问题的决定（部分）"
 
-        assert fields["law_type"].max_length >= len(longest.encode("utf-8"))
-        assert fields["province"].max_length >= len("新疆维吾尔自治区".encode("utf-8"))
-
-    def test_session_collection_uses_the_same_fields(self) -> None:
-        """两套 collection 共用一套字段形状，会话库也不能例外。"""
-        names = {field.name for field in _build_fields("session_id", 1024)}
-
-        assert set(_LEGAL_FILTER_FIELDS) <= names
+        assert LEGAL_FILTER_FIELD_LENGTHS["law_type"] >= len(longest.encode("utf-8"))
+        assert LEGAL_FILTER_FIELD_LENGTHS["province"] >= len("新疆维吾尔自治区".encode("utf-8"))

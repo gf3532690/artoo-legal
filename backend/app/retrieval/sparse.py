@@ -49,6 +49,8 @@ class SparseRetriever(BaseRetriever):
                     "parent_id": hit.get("parent_id", ""),
                     "chunk_index": hit.get("chunk_index", 0),
                     "element_type": hit.get("element_type", "text"),
+                    "law_type": hit.get("law_type", ""),
+                    "province": hit.get("province", ""),
                 },
             )
             for hit in hits
