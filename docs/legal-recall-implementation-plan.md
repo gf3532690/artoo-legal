@@ -674,7 +674,7 @@ Rerank 环境可跑对比。决策与 A/B 步骤见
 | 层 | 变化 |
 |----|------|
 | 路径 | 不变 |
-| 请求模型 | 字段本身不变；`kb_ids` 传个人库，`session_id` 已移除（显式传入返回 `400`，见 D7） |
+| 请求模型 | 原有字段不变；`kb_ids` 传个人库，`session_id` 已移除（显式传入返回 `400`，见 D7）。**2026-09-14 新增** `law_levels` / `province` / `city` 三个可选过滤字段（PRD 的层级与地域筛选；地域过滤保留国家层面法规），见 `artoo-open-api.md` 第 0 节与 `.agents/notes/implemented/architecture/2026-09-14-legal-filter-params.md` |
 | 认证 | 不变（沿用现有 Key 通道） |
 | 错误模型 | 不变 |
 | 响应信封 | 不变 |

@@ -49,6 +49,13 @@ change stored data: request parameters for level and region, hierarchy ranking
 weights, pagination, response `metadata` exposure, `article_id`, and an article
 detail endpoint can all be added later.
 
+> The request-parameter half has since shipped: see
+> [Legal hierarchy and region filters on the retrieval request](../../implemented/architecture/2026-09-14-legal-filter-params.md).
+> Filtering now runs as a Milvus pre-filter over exactly the scalars this note
+> adds. The status here stays `proposed` because the field set itself is still a
+> proposal for each new deployment — a collection built without them cannot accept
+> them later.
+
 ## Alternatives considered
 
 **Filter in PostgreSQL after the Milvus recall.** Requires no schema change and

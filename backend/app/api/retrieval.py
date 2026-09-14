@@ -25,6 +25,7 @@ from app.config import get_settings
 from app.models.manager import get_model_manager
 from app.retrieval.base import RetrievalResult
 from app.retrieval.factory import build_hybrid_retriever
+from app.retrieval.filter import RetrievalFilter, law_types_for_levels
 from app.pipeline.legal_metadata import strip_content_prefix
 from app.retrieval.legal_scope import resolve_global_legal_kb_ids
 from app.retrieval.multi_kb import KBRetrievalConfig, MultiKBRetriever
@@ -92,6 +93,20 @@ class RetrievalTestRequest(BaseModel):
     # 法条库部署的默认值：5（上游为 10）。字段名与语义保持不变，
     # 只调默认值，见 docs/legal-recall-implementation-plan.md 决策 #8。
     top_k: int = Field(default=5, ge=1, le=100, description="返回结果数量")
+    # ── 法条过滤（PRD《法条检索基础API》的"按效力层级 / 按省份城市筛选"）──
+    # 层级用枚举而不是语料原始 law_type：口径变化只需改应用层映射，不用重建索引。
+    law_levels: list[str] | None = Field(
+        default=None,
+        description="限定效力层级，取自 constitution / law / decision / "
+        "administrative_regulation / judicial_interpretation / local_regulation / "
+        "supervision_regulation；留空表示不限层级",
+    )
+    province: str | None = Field(
+        default=None, description="限定省份（如「江西省」）；国家层面法规始终保留"
+    )
+    city: str | None = Field(
+        default=None, description="限定城市（如「景德镇市」）；国家层面法规始终保留"
+    )
 
     def resolve_kb_ids(self) -> list[str]:
         """归并 ``kb_ids`` 与单选 ``knowledge_base_id`` 为去重后的知识库 ID 列表（保持顺序）。
@@ -109,6 +124,17 @@ class RetrievalTestRequest(BaseModel):
                 seen.add(kb_id)
                 deduped.append(kb_id)
         return deduped
+
+    def to_filter(self) -> RetrievalFilter | None:
+        """把层级/地域参数翻成检索过滤条件；未传任何过滤参数时返回 ``None``。"""
+        law_types = law_types_for_levels(self.law_levels)
+        if not (law_types or self.province or self.city):
+            return None
+        return RetrievalFilter(
+            law_types=law_types or None,
+            province=(self.province or "").strip() or None,
+            city=(self.city or "").strip() or None,
+        )
 
 
 class RetrievalResultItem(BaseModel):
@@ -231,11 +257,13 @@ async def _run_single_kb_retrieval(
     授权已在 ``_run_retrieval`` 前置完成，此处只负责召回与结果组装。
     """
     start = time.perf_counter()
+    legal_filter = body.to_filter()
+    expr = legal_filter.to_milvus_expr() if legal_filter else None
 
     if body.mode == "direct":
         manager = get_model_manager()
         retriever = VectorRetriever(manager.embedder, _get_milvus())
-        results = await retriever.search(body.query, kb_id, top_k=body.top_k)
+        results = await retriever.search(body.query, kb_id, top_k=body.top_k, expr=expr)
         items = await _build_result_items(results, global_kb_ids=global_kb_ids)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return RetrievalTestResponse(
@@ -253,7 +281,7 @@ async def _run_single_kb_retrieval(
     # 后的 top_k，由调用方参考 rerank_score 自行取舍。
     hybrid_retriever = await build_hybrid_retriever()
     results, trace_data = await hybrid_retriever.search_with_trace(
-        body.query, kb_id, top_k=body.top_k, apply_rerank_filter=False
+        body.query, kb_id, top_k=body.top_k, expr=expr, apply_rerank_filter=False
     )
     items = await _build_result_items(
         results, trace_data.get("per_result"), global_kb_ids=global_kb_ids
@@ -309,7 +337,7 @@ async def _run_multi_source_retrieval(
     # 不做问答链路的防幻觉软阈值截断，避免短/泛 query 被兜底也救不回而返回空。
     multi_result = await multi_kb.search(
         body.query, kb_configs, top_k=body.top_k, tenant_id=identity.tenant_id,
-        apply_rerank_filter=False,
+        filters=body.to_filter(), apply_rerank_filter=False,
     )
     items = await _build_result_items(
         multi_result.results, global_kb_ids=global_kb_ids

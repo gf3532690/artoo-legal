@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/proposed/architecture/2026-09-14-legal-filter-scalars-before-first-ingest.md .agents/notes/proposed/architecture/2026-09-14-legal-filter-scalars-before-first-ingest.zh.md
-2026-09-14-legal-filter-scalars-before-first-ingest.md: 8396496836cac67abad50db9dfb991aedf0720ae
-2026-09-14-legal-filter-scalars-before-first-ingest.zh.md: e24c55b4de3c17369875b5a80ad1e47d89081cd2
+2026-09-14-legal-filter-scalars-before-first-ingest.md: 1017b93c4eba85525e567e0a879e9311eb5431b3
+2026-09-14-legal-filter-scalars-before-first-ingest.zh.md: 685582f2c8dcca703b3d9e30c2f62917aa26801f

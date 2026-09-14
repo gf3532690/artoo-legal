@@ -37,6 +37,12 @@ Status: proposed
 接口层的事情明确不进 gate，因为它们不改已入库数据：层级与地域的请求参数、位阶排序权重、
 分页、响应 `metadata` 下发、`article_id`、法条详情端点，都可以之后再加。
 
+> 请求参数那半边随后已经落地：见
+> [检索请求上的效力层级与地域过滤](../../implemented/architecture/2026-09-14-legal-filter-params.zh.md)。
+> 过滤现在就是对本文档新增的那几个标量字段做 Milvus 预过滤。本文档仍保持 `proposed`，因为
+> "字段集合"对每个新部署而言仍是一份提案——一个没带这些字段建起来的 collection 之后无法接受
+> 它们。
+
 ## Alternatives considered
 
 **在 Milvus 召回之后用 PostgreSQL 过滤。** 不需要改 schema、不需要回填，而且 `law_type`

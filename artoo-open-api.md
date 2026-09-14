@@ -23,6 +23,7 @@
 | 4 | **结果 `metadata` 追加法条字段** | 身份与结构：`law_name`、`article_number`、`article_label`、`chapter`、`article_id`（`doc_id:条号`，无条号的文档不给）；效力与时间：`law_type`、`issuing_authority`、`publish_date`、`effective_date`、`validity_status`；地域：`province`、`city`；来源：`source`（取值 `global` / `personal`）。**取不到的字段整键缺失**（不是 `null`），客户端需按可空处理 |
 | 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
 | 6 | **代理 Key 的外部用户落在默认租户** | 1.2 / 1.3 的代理 Key 通道在本部署**可用**，但外部用户不再落在内置「外部用户租户」，而是落在默认租户（配置 `EXTERNAL_USER_TENANT_ID`），否则跨租户读不到全局法条库。另提供更适合单身份接入的「用户级 Key」。两种方式详见 2.0 |
+| 7 | **检索请求支持法条过滤** | 新增三个可选请求字段：`law_levels`（效力层级枚举，见 6.1）、`province`、`city`。**地域过滤保留国家层面法规**：指定省市时只筛地方性法规，`province` 为空的文档（法律 / 行政法规 / 司法解释等）始终保留 |
 
 ---
 
@@ -669,6 +670,18 @@ curl $BASE/api/knowledge-bases/<kb_id>/folders/<folder_id>/breadcrumb \
 - `knowledge_base_id`：单知识库 ID（与 `kb_ids` 二选一）。
 - `kb_ids`：多知识库联合检索的知识库 ID 列表（与 `knowledge_base_id` 二选一）。
 - `session_id`：把该会话**已上传的附件**作为一路检索源并入召回，**须为调用者本人会话**（非本人返回 404）。可单独使用，也可与知识库联合。
+
+**法条过滤（本部署新增，三个字段都可选、可组合）**：
+
+- `law_levels`：效力层级列表，取值 `constitution` / `law` / `decision` /
+  `administrative_regulation` / `judicial_interpretation` / `local_regulation` /
+  `supervision_regulation`。留空表示不限层级。三档常见用法：仅法律层级 →
+  `["constitution","law"]`（是否含 `decision` 由调用方决定）；含行政法规 → 再加
+  `"administrative_regulation"`；全部层级 → 不传该字段。拼错的层级名会被忽略（不会
+  变成"过滤掉一切"）。
+- `province` / `city`：限定省市（如 `"江西省"` / `"景德镇市"`）。**国家层面法规始终保留**
+  —— 指定地域只筛地方性法规，而不是把《民法典》之类排除在外；两者同时给定时，地方性法规
+  需要省市都匹配。
 
 模式说明：
 
