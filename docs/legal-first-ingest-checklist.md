@@ -100,3 +100,34 @@ PG 侧宽松得多：`chunk_metadata` 是 JSON 列，加键不需要迁移，值
 | `kb_chunk_cap` | 1,000,000（每库） |
 | 入库清单（选版后） | 22,036 份 / 778,880 条文行，约 **0.82 M** chunk（`article` 粒度） |
 | 地域覆盖（全量 29,957 份） | 有省份 27,579 / 只有城市 15 / 都无 2,363（国家标准类法规本就不属于省份） |
+
+## 冒烟测试记录（2026-09-14，本地 compose 环境）
+
+环境：`arag-*` compose 栈（Milvus v2.5.4 + Postgres + Redis + MinIO），Embedding/Rerank 走
+远程 `10.30.1.6:7997`；后端镜像重建为 `artoo-backend:legal` 并 `--force-recreate`。
+
+已实测通过（20 份 + 5 份两批，全部 `completed`，0 失败）：
+
+| 验收项 | 结果 |
+|---|---|
+| 一条文一子块 | worker 日志「父块 23，子块 23」；每份 chunk 数 ≈ 条文数（20 份共 681 子块） |
+| PG 元数据 | 例：`"景德镇制"陶瓷保护条例 \| 地方法规 \| 江西省 \| 景德镇市 \| article_number=1 \| 第一条` |
+| Milvus 过滤字段 | schema 含 `law_type`/`province`/`city`，索引 `idx_law_type`/`idx_province`/`idx_city` |
+| 按字段过滤 | `law_type=='地方法规' and province=='福建省'` 命中 3 条（城市=漳州/泉州）；`province==''` 为 0 |
+| 覆盖率 | 100% chunk 有地域；约 90% 有阿拉伯条号（其余是标题块与修正案条目） |
+
+**两条必须记住的运行前置**（都在这轮实际踩到）：
+
+1. **已存在的 collection 不会自动换 schema。** 目标环境里若有旧 schema 的
+   `artoo_chunks_1024`，写入新字段会直接失败：
+   `DataNotMatchException: Attempt to insert an unexpected field law_type to collection
+   without enabling dynamic field`。首次入库前必须先重建（`deploy/reset-knowledge-data.sh`，
+   或 `purge_data`）。
+2. **purge 前必须真的停掉 worker。** 停服命令要带 `--profile infra --profile app`，否则
+   worker 仍在跑；在途文档会在 collection 重建后继续写入，留下 **孤儿向量**（实测 PG 681 条
+   vs Milvus 712 条，抽样 60 个 chunk_id 有 4 个在 PG 不存在）。重置脚本只停 worker
+   （backend 要留着承载 purge 脚本），照它来即可。
+
+吞吐参考：默认 `pipeline_max_concurrent=4` 时约 **9–12 秒/份**（20 份约 3 分钟、5 份约 1 分钟），
+按 22,036 份外推约 **50–55 小时**。加速旋钮：`.env` 的 `PIPELINE_MAX_CONCURRENT`，以及加
+worker 实例（compose 里 `container_name` 固定，需额外 override）。

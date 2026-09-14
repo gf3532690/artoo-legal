@@ -95,6 +95,8 @@ backend/AGENT_REVIEW.md
 
 # 根目录 data（运行时上传数据）
 data/
+# reset-knowledge-data.sh 的 PostgreSQL 备份落点（含源数据，不进仓库）
+backups/
 
 # Deploy packages（打包后的部署产物目录，不入库）
 deploy-*/
