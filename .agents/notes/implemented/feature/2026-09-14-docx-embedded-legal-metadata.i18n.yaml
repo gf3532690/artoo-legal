@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/feature/2026-09-14-docx-embedded-legal-metadata.md .agents/notes/implemented/feature/2026-09-14-docx-embedded-legal-metadata.zh.md
+2026-09-14-docx-embedded-legal-metadata.md: b91ebb2ba1168c6d0f7b4555e83f263cb400e7c2
+2026-09-14-docx-embedded-legal-metadata.zh.md: 13635fca8da433f26b48fec6c9b3cf553a800620

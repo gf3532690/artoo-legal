@@ -3,7 +3,9 @@
 链路位置（顺序很重要）：
 
 1. **切分之前**——``analyze_legal_document``：目录剥离 + 法名解析。
-   目录区一旦被切成 chunk 就再也剥不掉了，所以必须前置。
+  目录区一旦被切成 chunk 就再也剥不掉了，所以必须前置。
+  文档级字段（法名 / 发布机关 / 发布日期）优先取 docx 内嵌属性
+  （``pipeline/docx_meta.py``）——那是权威来源；正文头部解析只作逐字段兜底。
 2. **切分与护栏之后**——``LegalMetadataExtractor.extract``：逐 chunk 抽条号、
    清洗章节路径。放在护栏之后是因为 ``enforce_size_limits`` 会再切超长父块，
    在它之前抽条号会让被拆出的父块丢失归属。
@@ -18,6 +20,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.pipeline.docx_meta import DocxProps
+from app.pipeline.legal_region import resolve_region
 from app.pipeline.legal_terms import (
     ARTICLE_LINE_PATTERN,
     ARTICLE_REFERENCE_PATTERN,
@@ -31,6 +35,12 @@ _TOC_LINE = re.compile(r"^[^\S\n]*目[\s\u3000]*录[^\S\n]*$", re.MULTILINE)
 # 语料 345 份里 344 份用全角、1 份（刑法修正案 19991225）用半角。
 _DATE_IN_PARENS = re.compile(
     r"[（(]\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日"
+)
+
+# 施行日期：「本法自2021年1月1日起施行。」。取**最后一个**匹配——施行条款按立法
+# 体例位于附则、即正文末尾；正文中段引用其它法律的施行日不构成本条文的生效日。
+_EFFECTIVE_DATE = re.compile(
+    r"自\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*起\s*施行"
 )
 
 # 章节路径清洗：只保留「第X编 / 第X分编 / 第X章 / 第X节」。
@@ -52,6 +62,20 @@ class LegalDocumentHeader:
     publish_date: str | None = None  # ISO: YYYY-MM-DD
     toc_stripped: bool = False
     has_article_structure: bool = True
+    # 文档级字段的来源：rule（正文解析）/ docx-props（内嵌属性）/ rule+docx（混合）。
+    # 口径是三个身份字段（law_name / issuing_authority / publish_date）的命中情况；
+    # 其余字段是否来自属性，直接看其值是否为空即可。
+    meta_source: str = "rule"
+    # ── 版本与溯源字段：只来自 docx 内嵌属性，正文里没有对应信息。──
+    effective_date: str | None = None  # ISO: YYYY-MM-DD
+    validity_status: int | None = None  # 原样保留，不解释枚举含义
+    law_type: str | None = None
+    external_id: str | None = None
+    source_code: str | None = None
+    # 地域（PRD 要求按省份/城市筛选地方性法规）。来源见 ``legal_region``：
+    # 自带省名 → 正文批准机关 → 城市→省份映射表；推不出就留空。
+    province: str | None = None
+    city: str | None = None
 
 
 def strip_toc(text: str) -> tuple[str, bool]:
@@ -83,7 +107,66 @@ def strip_toc(text: str) -> tuple[str, bool]:
     return stripped, True
 
 
-def parse_legal_header(text: str) -> LegalDocumentHeader:
+def parse_legal_header(
+    text: str, props: DocxProps | None = None
+) -> LegalDocumentHeader:
+    """解析文档头：法名 + 发布机关 + 发布日期。
+
+    ``props`` 是 docx 内嵌属性，即文档级字段的**权威来源**；正文解析是启发式，
+    只作逐字段兜底。``props`` 为 ``None`` 时行为与改造前完全一致。
+
+    优先级与形态说明：
+
+    - ``law_name``：``props.title`` → 正文「首行到日期行之前拼接」。
+    - ``issuing_authority``：``props.authority`` → 正文括注剥动词。两个来源都是
+      纯机关名（属性侧不含「通过 / 公布」等动词），形态一致可直接覆盖。
+    - ``publish_date``：``props.publish_date`` → 正文括注。两者都是 ISO 形态。
+    """
+    header = _parse_header_by_rule(text)
+    if props is None:
+        return header
+    return _apply_docx_props(header, props)
+
+
+def _apply_docx_props(
+    header: LegalDocumentHeader, props: DocxProps
+) -> LegalDocumentHeader:
+    """用 docx 内嵌属性逐字段覆盖正文解析结果。
+
+    取不到的字段保持正文解析的值，因此这是净增：属性缺失、损坏或文件不是 docx
+    时全链回退，不需要开关。``meta_source`` 记录实际命中情况供排查。
+    """
+    from_props: list[str] = []
+    if props.title:
+        header.law_name = props.title
+        from_props.append("law_name")
+    if props.authority:
+        header.issuing_authority = props.authority
+        from_props.append("issuing_authority")
+    if props.publish_date:
+        header.publish_date = props.publish_date
+        from_props.append("publish_date")
+    # 版本与溯源字段没有正文兜底（正文里不存在这些信息），有则覆盖、无则留空。
+    if props.effective_date:
+        header.effective_date = props.effective_date
+    if props.validity_status is not None:
+        header.validity_status = props.validity_status
+    if props.law_type:
+        header.law_type = props.law_type
+    if props.external_id:
+        header.external_id = props.external_id
+    if props.source_code:
+        header.source_code = props.source_code
+
+    if len(from_props) == 3:
+        header.meta_source = "docx-props"
+    elif from_props:
+        header.meta_source = "rule+docx"
+    # 三个字段一个都没命中时保持 "rule"：没有可标记的来源。
+    return header
+
+
+def _parse_header_by_rule(text: str) -> LegalDocumentHeader:
     """解析文档头：法名 + 发布机关 + 发布日期。
 
     **法名 = 首行到「日期行」之前的全部行拼接**，不是取首行。语料 345 份里
@@ -130,9 +213,27 @@ def parse_legal_header(text: str) -> LegalDocumentHeader:
         authority = authority.strip("　 、,，")
         header.issuing_authority = authority or None
 
+    header.effective_date = _parse_effective_date(text)
+
     law_name = "".join(title_parts).strip()
     header.law_name = law_name or (lines[0] if lines else None)
     return header
+
+
+def _parse_effective_date(text: str) -> str | None:
+    """从正文抽施行日期，抽不到返回 ``None``。
+
+    只在 docx 属性没有 ``effective_date`` 时才用得上（实测属性覆盖 75.2%，正文
+    兜底再加约 2.7 个百分点），所以宁可少抽也不猜：只认「自…起施行」这种完整表述，
+    并取最后一个匹配（附则在正文末尾）。
+    """
+    if not text:
+        return None
+    matches = _EFFECTIVE_DATE.findall(text)
+    if not matches:
+        return None
+    year, month, day = matches[-1]
+    return f"{year}-{int(month):02d}-{int(day):02d}"
 
 
 @dataclass
@@ -143,11 +244,18 @@ class LegalDocumentAnalysis:
     header: LegalDocumentHeader
 
 
-def analyze_legal_document(text: str) -> LegalDocumentAnalysis:
-    """切分前的一次性预处理：目录剥离 → 头部解析。"""
+def analyze_legal_document(
+    text: str, props: DocxProps | None = None
+) -> LegalDocumentAnalysis:
+    """切分前的一次性预处理：目录剥离 → 头部解析（docx 属性优先）。"""
     stripped, toc_stripped = strip_toc(text)
-    header = parse_legal_header(stripped)
+    header = parse_legal_header(stripped, props=props)
     header.toc_stripped = toc_stripped
+    header.province, header.city = resolve_region(
+        law_name=header.law_name,
+        issuing_authority=header.issuing_authority,
+        head_text=stripped[:2000],
+    )
     return LegalDocumentAnalysis(text=stripped, header=header)
 
 
@@ -290,6 +398,18 @@ class LegalMetadataExtractor:
                     "issuing_authority": header.issuing_authority,
                     "publish_date": header.publish_date,
                     "has_toc": header.toc_stripped,
+                    # 版本与溯源字段：来自 docx 内嵌属性，正文里没有对应信息，
+                    # 因此没有兜底路径，属性缺失时就是 None。
+                    "effective_date": header.effective_date,
+                    "validity_status": header.validity_status,
+                    "law_type": header.law_type,
+                    "external_id": header.external_id,
+                    "source_code": header.source_code,
+                    "province": header.province,
+                    "city": header.city,
+                    # 三个身份字段的来源（rule / docx-props / rule+docx）：与 has_toc
+                    # 同属排查字段，全量核对时靠它区分"权威值"与"启发式值"。
+                    "meta_source": header.meta_source,
                     "extraction_method": "rule",
                     "confidence": self._confidence(
                         header, number, has_articles

@@ -14,6 +14,8 @@ import os as _os
 _os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production")
 
 from app.pipeline.chunkers.laws import LawsChunker
+from app.pipeline.chunker import enforce_size_limits
+from app.pipeline.docx_meta import DocxProps
 from app.pipeline.legal_metadata import (
     LegalMetadataExtractor,
     analyze_legal_document,
@@ -63,6 +65,15 @@ XINGFA_AMENDMENT = """中华人民共和国刑法修正案
 （一）单独或者合谋，集中资金优势、持股或者持仓优势联合或者连续买卖的；
 （二）与他人串通，以事先约定的时间、价格和方式相互进行证券、期货交易的；
 四、本修正案自公布之日起施行。
+"""
+
+# ── fixture：含施行条款的法规（附则在末尾，正文中段引用其它法律的施行日） ──────
+
+STATUTE_WITH_EFFECTIVE_DATE = """中华人民共和国民法典
+（2020年5月28日第十三届全国人民代表大会第三次会议通过）
+第一条　为了保护民事主体的合法权益，制定本法。
+第九十九条　本法施行前发生的民事纠纷，依照当时的法律处理；原《合同法》自1999年10月1日起施行的规定不再适用。
+第一百条　本法自2021年1月1日起施行。
 """
 
 
@@ -138,6 +149,211 @@ class TestParseLegalHeader:
         assert header.has_article_structure is False
 
 
+class TestDocxPropsOverride:
+    """docx 内嵌属性是文档级字段的权威来源，正文解析只作逐字段兜底。"""
+
+    def test_props_override_rule_values(self) -> None:
+        props = DocxProps(
+            title="中华人民共和国民法典",
+            authority="全国人民代表大会",
+            publish_date="2020-05-28",
+        )
+
+        header = parse_legal_header(MINFADIAN_WITH_TOC, props=props)
+
+        assert header.law_name == "中华人民共和国民法典"
+        assert header.issuing_authority == "全国人民代表大会"
+        assert header.publish_date == "2020-05-28"
+        assert header.meta_source == "docx-props"
+
+    def test_partial_props_keep_rule_fallback(self) -> None:
+        """属性只给法名时，机关与日期仍走正文解析。"""
+        props = DocxProps(title="权威法名")
+
+        header = parse_legal_header(MINFADIAN_WITH_TOC, props=props)
+
+        assert header.law_name == "权威法名"
+        assert header.publish_date == "2020-05-28"
+        assert "第十三届全国人民代表大会" in (header.issuing_authority or "")
+        assert header.meta_source == "rule+docx"
+
+    def test_absent_props_leave_rule_result_untouched(self) -> None:
+        """props 为 None 时必须与改造前逐字段一致（净增，不是替换）。"""
+        without = parse_legal_header(MINFADIAN_WITH_TOC)
+        empty = parse_legal_header(
+            MINFADIAN_WITH_TOC, props=DocxProps(origin="custom")
+        )
+
+        assert without.law_name == empty.law_name == "中华人民共和国民法典"
+        assert without.publish_date == empty.publish_date == "2020-05-28"
+        assert without.issuing_authority == empty.issuing_authority
+        assert without.meta_source == empty.meta_source == "rule"
+
+    def test_props_do_not_change_article_structure_detection(self) -> None:
+        """``has_article_structure`` 来自正文，属性不参与判定。"""
+        props = DocxProps(title="中华人民共和国刑法修正案")
+
+        header = parse_legal_header(XINGFA_AMENDMENT, props=props)
+
+        assert header.law_name == "中华人民共和国刑法修正案"
+        assert header.has_article_structure is False
+
+    def test_analyze_legal_document_forwards_props(self) -> None:
+        """目录剥离与属性覆盖在同一次预处理里生效。"""
+        props = DocxProps(
+            title="中华人民共和国民法典",
+            authority="全国人民代表大会",
+            publish_date="2020-05-28",
+        )
+
+        analysis = analyze_legal_document(MINFADIAN_WITH_TOC, props=props)
+
+        assert analysis.header.toc_stripped is True
+        assert analysis.header.meta_source == "docx-props"
+        assert "目　　录" not in analysis.text
+        assert analysis.header.law_name == "中华人民共和国民法典"
+
+
+class TestVersionAndProvenanceFields:
+    """版本与溯源字段（effective_date / validity_status / law_type / …）。
+
+    这四个字段正文里没有对应信息，只来自 docx 内嵌属性，因此没有兜底路径：
+    属性缺失时必须留空，不能猜。``effective_date`` 是唯一有正文兜底的例外。
+    """
+
+    def test_props_populate_version_fields(self) -> None:
+        props = DocxProps(
+            title="中华人民共和国民法典",
+            effective_date="2021-01-01",
+            validity_status=3,
+            law_type="法律",
+            external_id="ff8081817e00906b017e055ae8c00e16",
+            source_code="national_laws",
+        )
+
+        header = parse_legal_header(MINFADIAN_WITH_TOC, props=props)
+
+        assert header.effective_date == "2021-01-01"
+        assert header.validity_status == 3
+        assert header.law_type == "法律"
+        assert header.external_id == "ff8081817e00906b017e055ae8c00e16"
+        assert header.source_code == "national_laws"
+
+    def test_version_fields_are_none_without_props(self) -> None:
+        """属性缺失时留空——这四个字段没有正文兜底。"""
+        header = parse_legal_header(MINFADIAN_WITH_TOC)
+
+        assert header.validity_status is None
+        assert header.law_type is None
+        assert header.external_id is None
+        assert header.source_code is None
+
+    def test_effective_date_falls_back_to_body_clause(self) -> None:
+        """属性没有施行日期时，回退到正文的「自…起施行」，并取最后一个匹配。"""
+        header = parse_legal_header(STATUTE_WITH_EFFECTIVE_DATE)
+
+        assert header.effective_date == "2021-01-01"
+
+    def test_props_effective_date_wins_over_body_clause(self) -> None:
+        props = DocxProps(effective_date="2021-02-01")
+
+        header = parse_legal_header(STATUTE_WITH_EFFECTIVE_DATE, props=props)
+
+        assert header.effective_date == "2021-02-01"
+
+    def test_effective_date_absent_everywhere_stays_none(self) -> None:
+        header = parse_legal_header(MINFADIAN_WITH_TOC)
+
+        assert header.effective_date is None
+
+    def test_extractor_emits_version_and_provenance_keys(self) -> None:
+        """字段要真的落到每个 child chunk 的元数据字典里。"""
+        props = DocxProps(
+            title="中华人民共和国民法典",
+            authority="全国人民代表大会",
+            publish_date="2020-05-28",
+            effective_date="2021-01-01",
+            validity_status=3,
+            law_type="法律",
+            external_id="ext-1",
+            source_code="national_laws",
+        )
+        analysis = analyze_legal_document(MINFADIAN_WITH_TOC, props=props)
+        chunker_result = LawsChunker().chunk(analysis.text)
+
+        meta = LegalMetadataExtractor().extract(
+            child_chunks=chunker_result.child_chunks,
+            parent_chunks=chunker_result.parent_chunks,
+            parent_child_map=chunker_result.parent_child_map,
+            section_paths=[[] for _ in chunker_result.child_chunks],
+            analysis=analysis,
+        )
+
+        assert meta
+        for entry in meta:
+            assert entry["effective_date"] == "2021-01-01"
+            assert entry["validity_status"] == 3
+            assert entry["law_type"] == "法律"
+            assert entry["external_id"] == "ext-1"
+            assert entry["source_code"] == "national_laws"
+            assert entry["meta_source"] == "docx-props"
+
+        # 属性把三个身份字段填满后，条文块的置信度到顶（标题块无条号，少 0.2）。
+        with_article = [e for e in meta if e["article_number"] is not None]
+        assert with_article
+        assert all(e["confidence"] == 1.0 for e in with_article)
+
+    def test_extractor_emits_null_keys_without_props(self) -> None:
+        """没有属性时键仍在，只是值为 None——字段字典是稳定形状。"""
+        analysis = analyze_legal_document(MINFADIAN_WITH_TOC)
+        chunker_result = LawsChunker().chunk(analysis.text)
+
+        meta = LegalMetadataExtractor().extract(
+            child_chunks=chunker_result.child_chunks,
+            parent_chunks=chunker_result.parent_chunks,
+            parent_child_map=chunker_result.parent_child_map,
+            section_paths=[[] for _ in chunker_result.child_chunks],
+            analysis=analysis,
+        )
+
+        assert meta
+        for entry in meta:
+            assert entry["validity_status"] is None
+            assert entry["law_type"] is None
+            assert entry["external_id"] is None
+            assert entry["source_code"] is None
+            assert entry["meta_source"] == "rule"
+
+    def test_region_fields_are_resolved_for_local_regulations(self) -> None:
+        """地方性法规要能落到省/市——PRD 的地域筛选依赖它。"""
+        text = (
+            "菏泽市煤炭清洁生产使用监督管理条例\n"
+            "（2016年12月23日菏泽市第十八届人民代表大会常务委员会第三十七次会议通过  "
+            "2017年1月18日山东省第十二届人民代表大会常务委员会第二十五次会议批准）\n"
+            "第一条　为了加强煤炭清洁生产使用监督管理，制定本条例。\n"
+        )
+
+        analysis = analyze_legal_document(text)
+        meta = LegalMetadataExtractor().extract(
+            child_chunks=["第一条　为了加强煤炭清洁生产使用监督管理，制定本条例。"],
+            parent_chunks=["第一条　为了加强煤炭清洁生产使用监督管理，制定本条例。"],
+            parent_child_map={0: [0]},
+            section_paths=[[]],
+            analysis=analysis,
+        )
+
+        assert analysis.header.province == "山东省"
+        assert analysis.header.city == "菏泽市"
+        assert meta[0]["province"] == "山东省"
+        assert meta[0]["city"] == "菏泽市"
+
+    def test_national_law_has_no_region(self) -> None:
+        analysis = analyze_legal_document(MINFADIAN_WITH_TOC)
+
+        assert analysis.header.province is None
+        assert analysis.header.city is None
+
+
 class TestArticleExtraction:
     def test_extracts_number_and_label(self) -> None:
         assert extract_article_number("第一百四十六条　具备下列条件…") == (
@@ -175,6 +391,55 @@ class TestSectionPathCleaning:
 
 
 class TestLawsChunkerFallback:
+
+    # 一条含两款的条文 + 一条单款条文。真实链路里 loader 用 "\n\n" 拼段落，
+    # 所以「同一父块内的多个段落」就长这样。
+    TWO_ARTICLES = (
+        "第一条　为了保护民事主体的合法权益，制定本法。\n\n"
+        "本条第二款内容，与第一款同属第一条。\n\n"
+        "第二条　民法调整平等主体的自然人之间的人身关系。"
+    )
+
+    def test_default_policy_splits_by_paragraph(self) -> None:
+        """默认策略＝改造前行为：款成为独立子块。"""
+        result = LawsChunker().chunk(self.TWO_ARTICLES)
+
+        assert result.child_chunks == [
+            "第一条　为了保护民事主体的合法权益，制定本法。",
+            "本条第二款内容，与第一款同属第一条。",
+            "第二条　民法调整平等主体的自然人之间的人身关系。",
+        ]
+
+    def test_article_policy_emits_one_child_per_article(self) -> None:
+        """article 策略：一条文一个子块，体量约为按款切的 41%。"""
+        result = LawsChunker(child_policy="article").chunk(self.TWO_ARTICLES)
+
+        assert result.child_chunks == [
+            "第一条　为了保护民事主体的合法权益，制定本法。\n\n本条第二款内容，与第一款同属第一条。",
+            "第二条　民法调整平等主体的自然人之间的人身关系。",
+        ]
+        assert len(result.parent_chunks) == len(result.child_chunks)
+
+    def test_unknown_policy_falls_back_to_paragraph(self) -> None:
+        """KB config 写错值不能把入库打挂，也不能静默换成别的切分器。"""
+        chunker = LawsChunker(child_policy="whatever")
+
+        assert chunker.child_policy == "paragraph"
+        assert len(chunker.chunk(self.TWO_ARTICLES).child_chunks) == 3
+
+    def test_long_article_is_still_split_by_the_size_guard(self) -> None:
+        """article 策略不等于"绝不切"：超长条文仍由护栏按句子边界再切。"""
+        long_article = "第一条　" + "。".join(
+            f"第{index}款内容要足够长以超过子块上限" for index in range(30)
+        ) + "。"
+
+        result = LawsChunker(child_policy="article").chunk(long_article)
+        assert len(result.child_chunks) == 1
+
+        guarded = enforce_size_limits(result, child_size=200)
+
+        assert len(guarded.child_chunks) > 1
+        assert all(len(child) <= 200 for child in guarded.child_chunks)
     def test_article_document_uses_article_boundaries(self) -> None:
         # 必须先用 analyze_legal_document 剥掉目录再切——这正是 pipeline 的顺序。
         analysis = analyze_legal_document(MINFADIAN_WITH_TOC)
