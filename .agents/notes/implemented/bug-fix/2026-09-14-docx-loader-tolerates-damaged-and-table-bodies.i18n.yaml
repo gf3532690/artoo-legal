@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/bug-fix/2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.md .agents/notes/implemented/bug-fix/2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.zh.md
-2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.md: 0fb6d0d3c167a0d71ac2a0986e3b0e064e99605e
-2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.zh.md: 26483a54d27005811e02bc5a23974f7a209a1968
+2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.md: 0ab1566fece5d9bcd2851fe0e8f259483fc791eb
+2026-09-14-docx-loader-tolerates-damaged-and-table-bodies.zh.md: 78397cb0c07ed9d1a91fe0a732c583b6bca6032c

@@ -42,8 +42,9 @@ text land in one text stream in document order, so the chunker still splits on
 「第X条」; a table-only statute becomes an ordinary article-structured document.
 When that walk yields nothing at all, the loader falls back to
 `docx_xml_text.paragraphs_from_bytes`, which reads paragraphs straight out of
-`word/document.xml` — coarse, but it covers content python-docx cannot model,
-including text boxes.
+`word/document.xml`. That fallback shares its paragraph-text implementation with
+the walk — see [single paragraph text
+extraction](2026-09-15-docx-single-paragraph-text-extraction.md).
 
 ## Alternatives considered
 
@@ -89,10 +90,13 @@ tables so that it matches the loader.
 pipeline passes loader metadata through as document metadata, so it is available
 for troubleshooting but is not part of any persisted contract.
 
-The XML fallback is deliberately all-or-nothing: it triggers only when the
-structured walk yields no text at all, so a document whose body mixes paragraphs
-with text boxes still loses the text-box part. Merging both sources was rejected
-as too risky for the common case (duplicate text) without a stronger signal.
+The XML fallback was deliberately all-or-nothing: it triggered only when the
+structured walk yielded no text at all, so a document whose body mixed paragraphs
+with text boxes still lost the text-box part. Merging both sources was rejected as
+too risky for the common case (duplicate text) without a stronger signal. Both
+that scope and the fallback's regex implementation were later replaced — see
+[single paragraph text
+extraction](2026-09-15-docx-single-paragraph-text-extraction.md).
 
 Repair only covers declaration-level damage. Files whose `word/document.xml` is
 genuinely broken still fail with `ValueError`, and the error now includes both
@@ -108,7 +112,7 @@ returned unchanged, a dangling internal relationship is removed while an externa
 It also pins table behaviour: document order across paragraph → table →
 paragraph, table-only documents, nested tables, merged cells being emitted once,
 every row of a 60-row table surviving, and a text-box-only body being recovered
-through the XML fallback.
+with non-empty text.
 
 Verification against the corpus: all 89 previously affected files now load with
 non-empty text (44 missing-part files → 307,502 characters / 2,013 articles,

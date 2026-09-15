@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/bug-fix/2026-09-15-docx-single-paragraph-text-extraction.md .agents/notes/implemented/bug-fix/2026-09-15-docx-single-paragraph-text-extraction.zh.md
+2026-09-15-docx-single-paragraph-text-extraction.md: ab42c79be20daea5c489da1ed7359825371c774d
+2026-09-15-docx-single-paragraph-text-extraction.zh.md: df0e9f31394b6f3649dd429de3c13b6292813590

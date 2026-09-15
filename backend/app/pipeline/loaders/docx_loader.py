@@ -12,11 +12,10 @@ import tempfile
 from docx import Document
 from docx.oxml.ns import qn
 from docx.table import Table
-from docx.text.paragraph import Paragraph
 
 from app.pipeline.loader import BaseLoader, EmbeddedImage, LoadResult
 from app.pipeline.loaders.docx_repair import repair_docx_bytes
-from app.pipeline.loaders.docx_xml_text import paragraphs_from_bytes
+from app.pipeline.loaders.docx_xml_text import paragraph_text, paragraphs_from_bytes
 
 _W_P = qn("w:p")
 _W_TBL = qn("w:tbl")
@@ -56,8 +55,8 @@ class DocxLoader(BaseLoader):
         # 按文档顺序提取正文段落与表格文字
         blocks = self._iter_body_blocks(doc)
         if not "".join(blocks).strip():
-            # 结构化遍历一无所获：文字在 python-docx 看不到的位置（实测有整部法条放在
-            # 文本框里的文档）。退回按 XML 取段落——宁可粗一点，也不能静默返回空正文。
+            # 结构化遍历一无所获：包结构不典型（python-docx 连 body 都读不出东西）。
+            # 退回直接解析 document.xml——宁可粗一点，也不能静默返回空正文。
             with open(file_path, "rb") as handle:
                 blocks = paragraphs_from_bytes(handle.read())
         content = "\n\n".join(blocks)
@@ -226,7 +225,10 @@ def _blocks_of(parent_element, parent) -> list[str]:
     blocks: list[str] = []
     for child in parent_element.iterchildren():
         if child.tag == _W_P:
-            text = Paragraph(child, parent).text.strip()
+            # 用 docx_xml_text.paragraph_text 而不是 Paragraph.text：后者看不到
+            # ``w:ins``（修订插入）与文本框里的 run，会让「第X条」的行首锚点失效。
+            # 语义定义与兜底路径共用一处，见该模块的说明。
+            text = paragraph_text(child).strip()
             if text:
                 blocks.append(text)
         elif child.tag == _W_TBL:
