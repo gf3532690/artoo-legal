@@ -1,5 +1,5 @@
 import { copyToClipboard } from '@/lib/clipboard'
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -24,8 +24,10 @@ import {
   Network,
   Link2,
   X,
+  Filter,
+  ChevronDown,
 } from 'lucide-react'
-import { documentApi, knowledgeBaseApi, folderApi, systemApi } from '@/lib/api'
+import { documentApi, knowledgeBaseApi, folderApi, systemApi, legalApi } from '@/lib/api'
 import type { PageResult, KBCapacity } from '@/lib/api'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { useConfirm } from '@/lib/confirm-context'
@@ -49,6 +51,15 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import FileItem from '@/components/documents/FileItem'
 import FolderItem from '@/components/documents/FolderItem'
 import FolderBreadcrumb from '@/components/documents/FolderBreadcrumb'
@@ -70,6 +81,10 @@ interface KnowledgeBaseItem {
   can_write?: boolean | null
   // 容量进度条（session-file-upload Req 7）
   capacity?: KBCapacity | null
+  // 全局法条库标记（后端 `legal_scope.DEFAULT_LEGAL_KB_FLAG`）：决定是否显示
+  // 「效力状态」筛选与徽标——非法条库里所有文档的这个字段都是空的，显示出来只会
+  // 是一个永远筛不出东西的控件。
+  config?: { is_default_legal_kb?: boolean } | null
 }
 
 // 面包屑项
@@ -124,6 +139,9 @@ function Documents() {
   const [renamingFolder, setRenamingFolder] = useState<FolderData | null>(null)
   const [viewingChunks, setViewingChunks] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  // 法条库「效力状态」筛选：多选取并集，空数组=不过滤。过滤在服务端做（走
+  // documents.validity_status 上的索引），不是把整页数据拉下来在前端筛。
+  const [validityFilter, setValidityFilter] = useState<number[]>([])
 
   // 批量选择状态
   const [selectionMode, setSelectionMode] = useState(false)
@@ -172,6 +190,22 @@ function Documents() {
   // 后端 get 接口未返回 can_write 时（加载中）默认按只读处理，避免误显示写入口。
   const canWrite = kb?.can_write === true
 
+  // 全局法条库：文件列表多一列「效力状态」，并多一个按它筛选的下拉。
+  const isLegalKb = kb?.config?.is_default_legal_kb === true
+
+  // 效力状态枚举（取值→标签）。只在法条库上取；标签由服务端下发，前端不写死。
+  const { data: validityOptions } = useQuery({
+    queryKey: ['legal-validity-statuses'],
+    queryFn: () => legalApi.validityStatuses(),
+    enabled: isLegalKb,
+    staleTime: Infinity, // 数据源字典口径，一次会话内不会变
+  })
+  const validityLabels = useMemo(() => {
+    const map: Record<number, string> = {}
+    for (const option of validityOptions ?? []) map[option.value] = option.label
+    return Object.keys(map).length > 0 ? map : undefined
+  }, [validityOptions])
+
   // 知识图谱入口门控（design.md 5.3.1）：全局 graph_enabled 且本 KB config.graph.enabled
   // 才显示「知识图谱」入口。未启用 → 不显示入口（而非显示后报错）。
   const { showEntry: showGraphEntry } = useGraphGating(kbId)
@@ -203,11 +237,15 @@ function Documents() {
     hasNextPage: hasMoreDocuments,
     isFetchingNextPage: isFetchingDocuments,
   } = useInfiniteQuery({
-    queryKey: ['documents', kbId, currentFolderId],
+    // 筛选值进 queryKey：改筛选条件即换一条查询，分页从头开始，不会把两种筛选的
+    // 结果页拼在一起。
+    queryKey: ['documents', kbId, currentFolderId, validityFilter],
     queryFn: ({ pageParam }) =>
-      documentApi.list(kbId!, currentFolderId, { page: pageParam, page_size: PAGE_SIZE }) as Promise<
-        PageResult<DocumentItem>
-      >,
+      documentApi.list(kbId!, currentFolderId, {
+        page: pageParam,
+        page_size: PAGE_SIZE,
+        validityStatus: validityFilter,
+      }) as Promise<PageResult<DocumentItem>>,
     initialPageParam: 1,
     getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.page + 1 : undefined),
     enabled: !!kbId,
@@ -429,6 +467,13 @@ function Documents() {
     setSelectedId(null)
   }
 
+  // 效力状态筛选：点一次加/减一个取值。空数组 = 不筛选（显示全部状态）。
+  function toggleValidityFilter(value: number) {
+    setValidityFilter((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    )
+  }
+
   // 处理文件选择（限制并发上传数，避免后端过载）
   function handleFileSelect(files: FileList | null) {
     if (!files) return
@@ -633,6 +678,7 @@ function Documents() {
       progress: doc.progress ?? 0,
       progress_message: doc.progress_message ?? null,
       law_name: doc.law_name ?? null,
+      validity_status: doc.validity_status ?? null,
       isLocal: false,
     })),
     ...uploadingFiles
@@ -646,6 +692,8 @@ function Documents() {
         chunk_count: 0,
         progress: 0,
         progress_message: null,
+        // 本地待上传的文件还没解析，谈不上效力状态
+        validity_status: null,
         isLocal: true,
       })),
   ]
@@ -844,6 +892,51 @@ function Documents() {
       {/* 面包屑导航 */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <FolderBreadcrumb items={breadcrumb} onNavigate={navigateToFolder} />
+        <div className="flex items-center gap-2 shrink-0">
+          {/* 法条库专有：按生效效力筛选文件（多选取并集，服务端过滤）。
+              非法条库不显示——那里的文档这个字段一律为空，摆一个永远筛不出东西的
+              控件只会让人以为文件丢了。 */}
+          {isLegalKb && validityOptions && validityOptions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs cursor-pointer transition-colors hover:bg-muted/40 ${
+                    validityFilter.length > 0 ? 'text-primary border-primary/40 bg-primary/5' : 'text-muted-foreground'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                  title="按效力状态筛选文件"
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                  效力状态
+                  {validityFilter.length > 0 && <span>（{validityFilter.length}）</span>}
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel>按效力状态筛选</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {validityOptions.map((option) => (
+                  <DropdownMenuCheckboxItem
+                    key={option.value}
+                    checked={validityFilter.includes(option.value)}
+                    onCheckedChange={() => toggleValidityFilter(option.value)}
+                    // 勾选后别关闭菜单：这个控件本来就是给人多选的
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    {option.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {validityFilter.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setValidityFilter([])}>
+                      清除筛选
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         <div className="flex items-center border border-border rounded-lg p-0.5 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setViewMode('grid') }}
@@ -857,6 +950,7 @@ function Documents() {
           >
             <List className="h-4 w-4" />
           </button>
+        </div>
         </div>
       </div>
 
@@ -990,6 +1084,7 @@ function Documents() {
                         isSelected={selectionMode ? selectedIds.has(doc.id) : selectedId === doc.id}
                         onSelect={selectionMode ? toggleDocSelection : handleSelectFile}
                         onRetry={canWrite ? (id) => retryMutation.mutate(id) : undefined}
+                        validityLabels={isLegalKb ? validityLabels : undefined}
                       />
                     </div>
                   </ContextMenuTrigger>

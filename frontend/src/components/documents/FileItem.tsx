@@ -25,6 +25,9 @@ export interface DocumentItem {
   folder_id?: string | null
   /** 法条库：该文档解析出的法名；人工换版时用于识别"同一部法的两份文档"。 */
   law_name?: string | null
+  /** 法条库：文档级效力状态（原值 3/2/1/-1/4/0）。与 `status` 无关：
+   *  后者是解析进度，这个是"这条法还有没有效"。 */
+  validity_status?: number | null
 }
 
 // 本地上传中的文件
@@ -49,6 +52,8 @@ export interface MergedFile {
   isLocal: boolean
   /** 法条库：解析出的法名（上传中的本地文件没有）。 */
   law_name?: string | null
+  /** 法条库：效力状态原值（上传中的本地文件没有）。 */
+  validity_status?: number | null
 }
 
 interface FileItemProps {
@@ -56,6 +61,8 @@ interface FileItemProps {
   isSelected: boolean
   onSelect: (id: string) => void
   onRetry?: (id: string) => void
+  /** 效力状态取值→标签，来自 `/api/legal/validity-statuses`；未就绪时不渲染徽标。 */
+  validityLabels?: Record<number, string>
 }
 
 // 根据文件类型返回对应图标
@@ -110,6 +117,27 @@ export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// 效力状态徽标配色。**标签不在这里**——由服务端 `/api/legal/validity-statuses` 下发，
+// 这个枚举已经被读反过一次（`0` 是「未标注」、`-1` 才是「已失效」），多一份拷贝就多
+// 一次抄错的机会。这里只决定颜色。
+const VALIDITY_TONE: Record<number, string> = {
+  3: 'bg-green-100 text-green-700 border-green-200', // 现行有效
+  2: 'bg-yellow-100 text-yellow-700 border-yellow-200', // 已修改
+  4: 'bg-blue-100 text-blue-700 border-blue-200', // 尚未生效
+  0: 'bg-muted text-muted-foreground border-border', // 未标注
+  1: 'bg-red-100 text-red-700 border-red-200', // 已废止
+  [-1]: 'bg-red-50 text-red-600 border-red-200', // 已失效
+}
+
+/** 效力状态徽标文案；拿不到标签表时返回 null（宁可不显示，也不猜一个含义）。 */
+export function validityLabel(
+  value: number | null | undefined,
+  labels?: Record<number, string>
+): string | null {
+  if (value == null || !labels) return null
+  return labels[value] ?? `取值 ${value}`
 }
 
 // 截断文件名
@@ -207,8 +235,9 @@ function FileThumbnail({ filename, status, docId }: { filename: string; status: 
 }
 
 // Finder 风格文件项
-function FileItem({ doc, isSelected, onSelect, onRetry }: FileItemProps) {
+function FileItem({ doc, isSelected, onSelect, onRetry, validityLabels }: FileItemProps) {
   const ext = getFileExt(doc.filename)
+  const validity = validityLabel(doc.validity_status, validityLabels)
 
   return (
     <div
@@ -296,6 +325,19 @@ function FileItem({ doc, isSelected, onSelect, onRetry }: FileItemProps) {
         >
           {doc.law_name}
         </p>
+      )}
+
+      {/* 法条库：效力状态徽标。与列表上那个解析进度徽标是两回事——进度说这份文件
+          解析完了没有，这个说这条法还有没有效。取不到标签表时整块不渲染。 */}
+      {validity && (
+        <Badge
+          variant="outline"
+          className={`mt-0.5 text-[8px] px-1.5 py-0 leading-tight font-normal ${
+            VALIDITY_TONE[doc.validity_status as number] ?? 'bg-muted text-muted-foreground border-border'
+          }`}
+        >
+          {validity}
+        </Badge>
       )}
     </div>
   )

@@ -62,6 +62,12 @@ export interface PageResult<T> {
   has_more: boolean
 }
 
+/** 法条效力状态枚举项（`/api/legal/validity-statuses`）。`value` 是落库与过滤用的原值。 */
+export interface ValidityStatusOption {
+  value: number
+  label: string
+}
+
 // 法条库共享入参（user 多选 + 权限）
 export interface ShareRequest {
   user_ids: string[]
@@ -200,12 +206,16 @@ export const documentApi = {
   list: (
     kbId: string,
     folderId?: string | null,
-    params?: { page?: number; page_size?: number }
+    params?: { page?: number; page_size?: number; validityStatus?: number[] }
   ) => {
     const qs = new URLSearchParams()
     if (folderId) qs.set('folder_id', folderId)
     qs.set('page', String(params?.page ?? 1))
     qs.set('page_size', String(params?.page_size ?? 20))
+    // 效力状态多选：同名参数重复传，服务端按并集过滤（union），不是取交集
+    for (const value of params?.validityStatus ?? []) {
+      qs.append('validity_status', String(value))
+    }
     return request<PageResult<unknown>>(`/knowledge-bases/${kbId}/documents?${qs.toString()}`)
   },
   upload: (kbId: string, file: File, folderId?: string | null) => {
@@ -439,6 +449,13 @@ export const retrievalApi = {
 export const legalApi = {
   article: (articleId: string) =>
     request<LegalArticleDetail>(`/legal/articles/${encodeURIComponent(articleId)}`),
+  /**
+   * 效力状态枚举（现行有效 / 已修改 / 已废止 / …）。
+   *
+   * 标签由服务端下发而不是前端写死：这个枚举已经被读反过一次（`0` 是「未标注」、
+   * `-1` 才是「已失效」），多一份拷贝就多一次抄错的机会。
+   */
+  validityStatuses: () => request<ValidityStatusOption[]>('/legal/validity-statuses'),
 }
 
 // API Key 相关接口
