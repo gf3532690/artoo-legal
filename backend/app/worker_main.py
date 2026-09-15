@@ -58,6 +58,11 @@ async def main():
     from app.startup import _auto_migrate_session_file_columns
     await _auto_migrate_session_file_columns()
 
+    # 法条文档级字段迁移（documents.validity_status + 其索引）：Worker 负责写这一列，
+    # 且可能先于 API 起来，所以自己也要保证结构就位
+    from app.startup import _auto_migrate_legal_document_columns
+    await _auto_migrate_legal_document_columns()
+
     # 幂等建好 Milvus 的两个物理 collection（Worker 可能先于 API 起来，各自幂等）
     from app.startup import init_milvus_collections
     await init_milvus_collections()

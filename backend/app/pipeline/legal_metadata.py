@@ -52,6 +52,40 @@ _KEEP_CHAPTER = re.compile(
 # 发布机关尾部的动词，用于从括注里剥出机关名。
 _TRAILING_VERB = re.compile(r"(通过|公布|修订|修正|施行|废止)$")
 
+# 效力状态：数据源字典的官方枚举（2026-09-15 从其字典确认）。落库与下发一律是原始整数，
+# 标签只用于展示——文件列表的筛选与徽标、以及 ``GET /api/legal/validity-statuses``。
+#
+# 两个取值容易被读反，记在这里免得再错一次：``0`` 是**未标注**而不是「已废止」（它主要落在
+# 「修改、废止的决定」这类文件上，源库本就不给这类文件标状态），``-1`` 才是**已失效**。
+VALIDITY_STATUS_LABELS: dict[int, str] = {
+    3: "现行有效",
+    2: "已修改",
+    1: "已废止",
+    -1: "已失效",
+    4: "尚未生效",
+    0: "未标注",
+}
+
+
+def document_validity_status(legal_metadata: list[dict] | None) -> int | None:
+    """从 per-chunk 法条元数据里取**文档级**效力状态。
+
+    同一份文档的每个子块带的都是同一个文档级值（``validity_status`` 只来自 docx
+    内嵌属性），因此按子块顺序取第一个非空即可。取不到就返回 ``None``——"读不到"
+    与"这条法条失效了"是两回事，也与"未标注（``0``）"是两回事，不能混为一谈。
+    """
+    for meta in legal_metadata or ():
+        if not isinstance(meta, dict):
+            continue
+        value = meta.get("validity_status")
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
 
 @dataclass
 class LegalDocumentHeader:
@@ -68,7 +102,7 @@ class LegalDocumentHeader:
     meta_source: str = "rule"
     # ── 版本与溯源字段：只来自 docx 内嵌属性，正文里没有对应信息。──
     effective_date: str | None = None  # ISO: YYYY-MM-DD
-    validity_status: int | None = None  # 原样保留，不解释枚举含义
+    validity_status: int | None = None  # 原样保留；含义见 VALIDITY_STATUS_LABELS
     law_type: str | None = None
     external_id: str | None = None
     source_code: str | None = None

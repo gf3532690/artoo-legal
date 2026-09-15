@@ -218,28 +218,26 @@ async def load_asr_manager() -> "ASRManager":
     return ASRManager(await load_asr_configs())
 
 
-async def _auto_migrate_session_file_columns() -> None:
-    """自动为 session_files 表补齐异步上传所需的新列（轻量级迁移，幂等）。
+async def _ensure_schema_objects(
+    columns: list[tuple[str, str, str]],
+    indexes: list[tuple[str, str]] | None = None,
+) -> None:
+    """按「缺什么补什么」补齐列与索引（轻量级迁移，幂等）。
 
     与 main.py::_auto_migrate_columns 同款模式：先查 information_schema.columns
     判断列是否存在，缺失才 ALTER TABLE ADD COLUMN。老库平滑升级，新库经 init_db
     的 create_all 已建好，本函数全部跳过。
 
+    ``indexes`` 单独一张表而不是跟着列走：列存在不代表索引存在——老库是被
+    ALTER TABLE 补出来的列，create_all 不会再回头给它建索引，而列表页的等值
+    过滤正是要靠这个索引。用 ``CREATE INDEX IF NOT EXISTS`` 兜住。
+
     API 进程与 Worker 进程启动时各调用一次（幂等，重复调用安全）。
     """
     from sqlalchemy import text
 
-    migrations = [
-        # session_files.progress (Integer, default 0) - 0-100 建索引进度
-        ("session_files", "progress", "ALTER TABLE session_files ADD COLUMN progress INTEGER DEFAULT 0"),
-        # session_files.progress_message (String, nullable) - 当前阶段人类可读描述
-        ("session_files", "progress_message", "ALTER TABLE session_files ADD COLUMN progress_message VARCHAR"),
-        # session_files.error_message (Text, nullable) - 失败原因
-        ("session_files", "error_message", "ALTER TABLE session_files ADD COLUMN error_message TEXT"),
-    ]
-
     async with async_session() as session:
-        for table, column, sql in migrations:
+        for table, column, sql in columns:
             try:
                 # 检查列是否已存在
                 check_sql = text(
@@ -254,6 +252,53 @@ async def _auto_migrate_session_file_columns() -> None:
             except Exception as e:
                 logger.debug("迁移检查跳过 %s.%s: %s", table, column, e)
                 await session.rollback()
+        for index_name, sql in indexes or ():
+            try:
+                await session.execute(text(sql))
+                await session.commit()
+                logger.debug("自动迁移：确保索引存在 %s", index_name)
+            except Exception as e:
+                logger.debug("迁移检查跳过索引 %s: %s", index_name, e)
+                await session.rollback()
+
+
+async def _auto_migrate_session_file_columns() -> None:
+    """自动为 session_files 表补齐异步上传所需的新列（轻量级迁移，幂等）。"""
+    await _ensure_schema_objects(
+        [
+            # session_files.progress (Integer, default 0) - 0-100 建索引进度
+            ("session_files", "progress", "ALTER TABLE session_files ADD COLUMN progress INTEGER DEFAULT 0"),
+            # session_files.progress_message (String, nullable) - 当前阶段人类可读描述
+            ("session_files", "progress_message", "ALTER TABLE session_files ADD COLUMN progress_message VARCHAR"),
+            # session_files.error_message (Text, nullable) - 失败原因
+            ("session_files", "error_message", "ALTER TABLE session_files ADD COLUMN error_message TEXT"),
+        ]
+    )
+
+
+async def _auto_migrate_legal_document_columns() -> None:
+    """自动为 documents 表补齐法条文档级字段（轻量级迁移，幂等）。
+
+    ``documents.validity_status`` 供文件列表按效力状态过滤，因此必须配索引——
+    否则每次列表都要去 chunks 的 JSON 列里捞，那就不叫「快速过滤」了。
+
+    列在这里补出来时**不回填**：存量文档的状态只存在于 ``chunks.metadata``，
+    回填要扫全表，不适合放在每次启动都要跑的路径上，改由
+    ``scripts/backfill_document_validity.py`` 显式执行。
+    """
+    await _ensure_schema_objects(
+        [
+            # documents.validity_status (Integer, nullable) - 文档级效力状态（原样存数据源整数）
+            ("documents", "validity_status", "ALTER TABLE documents ADD COLUMN validity_status INTEGER"),
+        ],
+        [
+            (
+                "ix_documents_validity_status",
+                "CREATE INDEX IF NOT EXISTS ix_documents_validity_status "
+                "ON documents (validity_status)",
+            ),
+        ],
+    )
 
 
 async def start_invalidation_bus(handlers: dict[str, callable]) -> None:

@@ -88,6 +88,11 @@ class Document(Base, TenantScopedMixin):
     graph_status: Mapped[str] = mapped_column(String, default="none", nullable=False)
     # 权威 attempt 计数，重解析时 +1，用于隔离陈旧的在途抽取子任务
     graph_attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 法条库：文档级效力状态，原样存数据源的整数枚举（见 legal_metadata.VALIDITY_STATUS_LABELS）。
+    # 与其它法条字段不同，它不只在 chunk_metadata 里——文件列表要按它做等值过滤，每次都去
+    # JSON 列里捞就没法走索引，所以落成 documents 上的一列并建索引（`ix_documents_validity_status`）。
+    # 非 `status=completed` 的文档、非法条文档为 NULL。
+    validity_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # 关联

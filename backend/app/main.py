@@ -56,6 +56,10 @@ async def lifespan(app: FastAPI):
     from app.startup import _auto_migrate_session_file_columns
     await _auto_migrate_session_file_columns()
 
+    # 法条文档级字段迁移（documents.validity_status + 其索引）
+    from app.startup import _auto_migrate_legal_document_columns
+    await _auto_migrate_legal_document_columns()
+
     # 初始化对象存储 bucket（知识库源文件权威存储）
     await _init_object_store()
 

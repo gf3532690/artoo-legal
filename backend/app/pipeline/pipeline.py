@@ -41,6 +41,7 @@ from app.pipeline.legal_metadata import (
     LegalMetadataExtractor,
     analyze_legal_document,
     build_content_prefix,
+    document_validity_status,
 )
 from app.pipeline.progress import PipelineStage, ProgressTracker
 from app.schema.db import Chunk, Document, KnowledgeBase
@@ -817,7 +818,15 @@ class DocumentPipeline:
                 )
 
                 # ─── 完成 ───
-                await self._update_status(session, doc_id, "completed", chunk_count=child_count)
+                # 文档级效力状态随完成一起落库：文件列表要按它过滤，落在 documents 上
+                # 才能走索引（chunks 的 JSON 列上做不了快速等值过滤）。
+                await self._update_status(
+                    session,
+                    doc_id,
+                    "completed",
+                    chunk_count=child_count,
+                    validity_status=document_validity_status(legal_metadata),
+                )
                 await session.commit()
                 await tracker.complete()
 
@@ -1341,8 +1350,13 @@ class DocumentPipeline:
         status: str,
         chunk_count: int | None = None,
         error_message: str | None = None,
+        validity_status: int | None = None,
     ) -> None:
-        """更新文档状态"""
+        """更新文档状态。
+
+        可选参数沿用 ``chunk_count`` 的语义：``None`` 表示「本次不动这个字段」，
+        而不是「把它清空」。
+        """
         result = await session.execute(select(Document).where(Document.id == doc_id))
         doc = result.scalar_one_or_none()
         if doc is None:
@@ -1352,6 +1366,8 @@ class DocumentPipeline:
             doc.chunk_count = chunk_count
         if error_message is not None:
             doc.error_message = error_message
+        if validity_status is not None:
+            doc.validity_status = validity_status
 
     async def _check_cancelled(self, doc_id: str) -> None:
         """检查文档是否已被取消/删除，是则抛出异常终止处理"""
