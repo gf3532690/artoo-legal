@@ -74,8 +74,14 @@ legal keys (for example a strict schema on a typed client) needs updating.
 `修改、废止的决定` and `法规性决定`), not as a normalised hierarchy: mapping those
 to the PRD's three levels is a filter-side concern and stays in the application
 layer so it can change without re-ingestion. `validity_status` is likewise
-exposed as the raw integer; its enum is still unconfirmed, so consumers should not
-assume `3` means "in force" until the producer documents it.
+exposed as the raw integer and still is; what changed is that the enum is no
+longer undocumented. It has since been obtained from the data source's own
+dictionary — `3` 现行有效 / `2` 已修改 / `1` 已废止 / `-1` 已失效 / `4` 尚未生效 /
+`0` 未标注 — and
+[Recall excludes repealed and lapsed statutes by default](../feature/2026-09-15-legal-exclude-repealed-by-default.md)
+now interprets two of its values. The recommendation to consumers is unchanged in
+shape: read the raw integer, but read its definition from that note rather than
+guessing.
 
 ## Testing
 

@@ -69,7 +69,13 @@ class TestRequestFieldContract:
 
 
 class TestResponseEnvelope:
-    """响应信封的字段集合是稳定契约。"""
+    """响应信封的字段集合是稳定契约。
+
+    本次新增 5 个字段是**有意的契约扩展**（PRD F-006 分页 / F-002 精确模式）：
+    ``page`` / ``page_size`` / ``has_more`` 描述分页位置，``match_mode`` 回显实际生效的模式
+    （exact 没命中会退回 semantic），``fallback_reason`` 说明回退原因。都带默认值，
+    因此对不传新参数的既有调用方是向后兼容的。
+    """
 
     EXPECTED_KEYS = {
         "query",
@@ -80,6 +86,12 @@ class TestResponseEnvelope:
         "trace",
         "degraded",
         "failed_source_count",
+        "page",
+        "page_size",
+        "has_more",
+        "match_mode",
+        "fallback_reason",
+        "filtered_invalid_count",
     }
 
     def test_envelope_keys_are_exactly_the_documented_set(self) -> None:

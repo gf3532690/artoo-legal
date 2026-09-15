@@ -25,6 +25,7 @@ from app.api.folder import router as folder_router
 from app.api.graph import router as graph_router
 from app.api.knowledge_base import router as kb_router
 from app.api.kb_share_link import router as kb_share_link_router
+from app.api.legal import router as legal_router
 from app.api.llm_config import router as llm_config_router
 from app.api.ocr_config import router as ocr_config_router
 from app.api.asr_config import router as asr_config_router
@@ -429,6 +430,7 @@ app.include_router(folder_router)
 app.include_router(document_router)
 app.include_router(graph_router)
 app.include_router(retrieval_router)
+app.include_router(legal_router)
 app.include_router(system_router)
 app.include_router(api_key_router)
 app.include_router(llm_config_router)

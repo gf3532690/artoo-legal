@@ -15,15 +15,17 @@ TODO: [准度风险] 当知识库中大量表格 chunk（如 CSV 5万+条）与�
 """
 
 import logging
+import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from app.config import get_settings
 from app.models.manager import get_model_manager
+from app.pipeline.legal_terms import CN_NUMERAL_CHARS, chinese_to_int
 from app.retrieval.base import RetrievalResult
+from app.retrieval.article_lookup import load_article_rows
 from app.retrieval.factory import build_hybrid_retriever
 from app.retrieval.filter import RetrievalFilter, law_types_for_levels
 from app.pipeline.legal_metadata import strip_content_prefix
@@ -37,33 +39,56 @@ from app.storage.milvus import (
 )
 
 from app.api.deps import require_authenticated
-from app.api.errors import PermissionDeniedError
 from app.auth.identity import IdentityContext
-from app.auth.kb_authz import KbAccessEnum
-from app.auth.kb_scope import authorize_requested_kbs
+from app.auth.kb_scope import authorize_content_read
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/retrieval", tags=["Retrieval"])
 
+# 分页窗口上限。分页靠「多取一页候选、再切片」实现，而候选池本身有上限
+# （单库 hybrid 的 rerank 候选池见 retrieval config 的 ``rerank_candidate_k``，默认 50），
+# 窗口超过它就无法保证「第 N 页」真是排序里的第 N 页。这里固定上限并明确拒绝，
+# 而不是悄悄返回空页。
+_MAX_PAGINATION_WINDOW = 100
 
-async def _authorize_and_boundary(
-    identity: IdentityContext,
-    kb_ids: list[str],
-) -> None:
-    """召回前置授权（触达 Milvus 前先拒）。
+# 语义 / 精确两种模式。exact = 「法名 + 条号」直接查元数据，不参与相似度排序。
+MATCH_MODE_SEMANTIC = "semantic"
+MATCH_MODE_EXACT = "exact"
 
-    - 内容边界：超管默认不可读业务正文。
-    - KB 读授权：逐个校验 ``kb_ids`` 处于身份可读范围（跨租户/不可读 → 404）。
+# 效力状态官方枚举（由数据源字典确认，2026-09-15）：
+#   3 现行有效 / 2 已修改 / 1 已废止 / -1 已失效 / 4 尚未生效 / 0 未标注
+# 默认排除的只有「明确不具法律效力」的两个：已废止与已失效。未标注(0) 主要是修改/废止决定
+# 这类文件（本身是有效文件），尚未生效(4) 是还没生效的新法——两者都不该被静默吞掉。
+INVALID_VALIDITY_STATUSES = frozenset({1, -1})
 
-    会话附件的归属校验已随会话链路移除（见方案 D7）。
+# 默认口径下要过采样多少倍：库内已废止/已失效约占 12%，取多少条候选得相应放大，否则过滤后
+# 一页可能凑不满。真正的解法是把 validity_status 做成 Milvus 标量字段做预过滤（需重建集合）。
+_INVALID_OVERSAMPLE = 4
+
+# 「第X条」引用：X 可以是中文数字（含零〇两）或阿拉伯数字。
+_ARTICLE_REF = re.compile(rf"第\s*([{CN_NUMERAL_CHARS}\d]+)\s*条")
+
+# 法名两侧可能带的书名号 / 引号 / 标点，解析前先剥掉。
+_LAW_NAME_TRIM = "《》〈〉「」『』\"'“”‘’ 　:：,，、;；"
+
+
+def parse_article_query(query: str) -> tuple[str | None, int | None]:
+    """把「法名 + 条号」式查询拆成 ``(法名, 条号)``；拆不出返回 ``(None, None)``。
+
+    支持「刑法第234条」「《中华人民共和国民法典》第一条」「民法典 第一百四十六条」等写法。
+    只认第一处「第X条」——法名内部不会再出现条号，取第一处即可。
     """
-    if identity.is_super_admin and not get_settings().content_view_boundary_open:
-        raise PermissionDeniedError("超级管理员默认不可查看业务内容正文")
-    if kb_ids:
-        async with async_session() as session:
-            await authorize_requested_kbs(session, identity, kb_ids, KbAccessEnum.READ)
-
+    text = (query or "").strip()
+    match = _ARTICLE_REF.search(text)
+    if not match:
+        return None, None
+    numeral = match.group(1)
+    number = int(numeral) if numeral.isdigit() else chinese_to_int(numeral)
+    if number is None or number <= 0:
+        return None, None
+    law_name = text[: match.start()].strip().strip(_LAW_NAME_TRIM).strip()
+    return (law_name or None), number
 
 # ============================================================
 # 请求/响应模型
@@ -93,6 +118,23 @@ class RetrievalTestRequest(BaseModel):
     # 法条库部署的默认值：5（上游为 10）。字段名与语义保持不变，
     # 只调默认值，见 docs/legal-recall-implementation-plan.md 决策 #8。
     top_k: int = Field(default=5, ge=1, le=100, description="返回结果数量")
+    page: int = Field(
+        default=1, ge=1,
+        description="页码（从 1 开始，每页 top_k 条）。分页窗口 page×top_k 上限 100——"
+        "召回候选池本身有上限，更深的翻页没有意义。",
+    )
+    match_mode: str = Field(
+        default=MATCH_MODE_SEMANTIC,
+        description="semantic（默认，语义召回）/ exact（「法名 + 条号」精确检索）。"
+        "exact 命中时直接按法条元数据返回该条，不参与相似度排序；没命中会退回 semantic，"
+        "并在响应的 fallback_reason 里说明原因。",
+    )
+    include_invalid: bool = Field(
+        default=False,
+        description="是否包含已废止（validity_status=1）与已失效（-1）的法条。默认 false——"
+        "检索只返回仍有法律效力的条文。置 true 可一并查历史版本（例如按行为发生时的法律）。"
+        "只作用于语义召回；match_mode=exact 与法条详情按 ID 点名取，不受此开关影响。",
+    )
     # ── 法条过滤（PRD《法条检索基础API》的"按效力层级 / 按省份城市筛选"）──
     # 层级用枚举而不是语料原始 law_type：口径变化只需改应用层映射，不用重建索引。
     law_levels: list[str] | None = Field(
@@ -135,6 +177,10 @@ class RetrievalTestRequest(BaseModel):
             province=(self.province or "").strip() or None,
             city=(self.city or "").strip() or None,
         )
+
+    def window(self) -> int:
+        """分页窗口 = ``page × top_k``：一次取这么多候选，再切出本页。"""
+        return self.top_k * self.page
 
 
 class RetrievalResultItem(BaseModel):
@@ -189,6 +235,16 @@ class RetrievalTestResponse(BaseModel):
     trace: RetrievalTrace | None = None
     degraded: bool = False  # 是否有检索源失败（多源场景才可能为 True）
     failed_source_count: int = 0  # 失败的检索源数量（多源场景；单源恒为 0）
+    # 分页：total 仍是"本次返回条数"（保持既有语义），翻页判据看 has_more。
+    page: int = 1
+    page_size: int = 0  # = 请求里的 top_k
+    has_more: bool = False  # 本页之后是否还有候选（多取一条探到，不是估计）
+    # 实际生效的检索模式；exact 没命中时会退回 semantic 并给出原因。
+    match_mode: str = MATCH_MODE_SEMANTIC
+    fallback_reason: str | None = None
+    # 默认口径下被排除的已废止/已失效条数（include_invalid=true 时恒为 0）。
+    # 单独给出是因为"为什么只返回 3 条"是调用方最容易困惑的地方。
+    filtered_invalid_count: int = 0
 
 
 # ============================================================
@@ -199,6 +255,72 @@ class RetrievalTestResponse(BaseModel):
 def _get_milvus() -> MilvusClient:
     """获取 Milvus 客户端"""
     return get_milvus_client()
+
+
+# ------------------------------------------------------------------
+# 精确检索与分页的共用件
+# ------------------------------------------------------------------
+
+
+def _is_invalid_legal(metadata: dict) -> bool:
+    """该结果的效力状态是否属于「已废止 / 已失效」。
+
+    取不到 ``validity_status`` 时**视为有效**：我们读不到不等于这条法条失效，宁可多给一条，
+    也不要因为元数据缺失让调用方凭空少一条结果。
+    """
+    return metadata.get("validity_status") in INVALID_VALIDITY_STATUSES
+
+
+def _slice_page_items(
+    items: list, body: RetrievalTestRequest
+) -> tuple[list, bool]:
+    """在**过滤之后**的结果列表上切页。
+
+    ``has_more`` 是用多取的那一条探出来的，不是估计——所以调用方必须先按
+    ``window() + 1`` 取候选（默认口径还要再按 :data:`_INVALID_OVERSAMPLE` 放大），完成效力
+    状态过滤后再切页；切片放在过滤之前会把 ``has_more`` 和页码都算错。
+    """
+    start = (body.page - 1) * body.top_k
+    end = start + body.top_k
+    return items[start:end], len(items) > end
+
+
+async def _exact_retrieval(
+    body: RetrievalTestRequest,
+    rows: list[dict],
+    *,
+    global_kb_ids: list[str] | None,
+) -> RetrievalTestResponse:
+    """把精确命中的法条包成与语义召回一致的响应（含法条元数据与来源标记）。"""
+    start = time.perf_counter()
+    results = [
+        RetrievalResult(
+            chunk_id=row["chunk_id"],
+            content=row["article_content"],
+            score=1.0,
+            doc_id=row["doc_id"],
+            child_content=row["child_content"],
+            metadata={},
+        )
+        for row in rows
+    ]
+    # 点名取那一条：exact 不受效期开关影响（要查已废止版本的原文也该能查到，
+    # 结果里带 validity_status 由调用方自行判断）。
+    items, _ = await _build_result_items(results, global_kb_ids=global_kb_ids)
+    for item in items:
+        item.routes = ["exact"]
+    return RetrievalTestResponse(
+        query=body.query,
+        mode=MATCH_MODE_EXACT,
+        total=len(items),
+        elapsed_ms=int((time.perf_counter() - start) * 1000),
+        results=items,
+        trace=None,
+        page=1,
+        page_size=len(items),
+        has_more=False,
+        match_mode=MATCH_MODE_EXACT,
+    )
 
 
 async def _run_retrieval(
@@ -217,6 +339,18 @@ async def _run_retrieval(
         raise HTTPException(
             status_code=400,
             detail="本部署不支持 session_id：会话附件链路已移除，请改用 kb_ids",
+        )
+
+    # 枚举与分页窗口都显式校验：写错枚举不该静默退化成"不过滤 / 不分页"。
+    if body.match_mode not in (MATCH_MODE_SEMANTIC, MATCH_MODE_EXACT):
+        raise HTTPException(
+            status_code=400,
+            detail=f"match_mode 只支持 {MATCH_MODE_SEMANTIC} / {MATCH_MODE_EXACT}",
+        )
+    if body.window() > _MAX_PAGINATION_WINDOW:
+        raise HTTPException(
+            status_code=400,
+            detail=f"分页窗口 page×top_k={body.window()} 超过上限 {_MAX_PAGINATION_WINDOW}",
         )
 
     kb_ids = body.resolve_kb_ids()
@@ -238,19 +372,41 @@ async def _run_retrieval(
         )
 
     # 触达 Milvus 前先校验：内容边界 + KB 读权限（跨租户/不可读 404）。
-    await _authorize_and_boundary(identity, kb_ids)
+    await authorize_content_read(identity, kb_ids)
+
+    # 精确检索：解析出「法名 + 条号」就直接按元数据取，不参与相似度排序。
+    # 解析不出或库里没有 → 记下原因，退回语义召回并在响应里说明（不静默降级）。
+    fallback_reason: str | None = None
+    if body.match_mode == MATCH_MODE_EXACT:
+        law_name, article_number = parse_article_query(body.query)
+        if article_number is None:
+            fallback_reason = "查询里没有可解析的「第X条」条号，已按 semantic 召回"
+        else:
+            rows = await load_article_rows(
+                kb_ids=kb_ids, article_number=article_number, law_name=law_name
+            )
+            if rows:
+                return await _exact_retrieval(body, rows, global_kb_ids=global_kb_ids)
+            label = f"《{law_name}》" if law_name else ""
+            fallback_reason = f"库里没有{label}第{article_number}条，已按 semantic 召回"
 
     # 多源（多库）走 MultiKBRetriever 混合召回；单库单源保留 direct/hybrid + trace。
     if len(kb_ids) > 1:
-        return await _run_multi_source_retrieval(body, kb_ids, identity, global_kb_ids)
+        return await _run_multi_source_retrieval(
+            body, kb_ids, identity, global_kb_ids, fallback_reason=fallback_reason
+        )
 
-    return await _run_single_kb_retrieval(body, kb_ids[0], global_kb_ids)
+    return await _run_single_kb_retrieval(
+        body, kb_ids[0], global_kb_ids, fallback_reason=fallback_reason
+    )
 
 
 async def _run_single_kb_retrieval(
     body: RetrievalTestRequest,
     kb_id: str,
     global_kb_ids: list[str] | None = None,
+    *,
+    fallback_reason: str | None = None,
 ) -> RetrievalTestResponse:
     """单库单源检索：保留原 ``direct`` / ``hybrid`` + trace 行为（零回归）。
 
@@ -259,12 +415,21 @@ async def _run_single_kb_retrieval(
     start = time.perf_counter()
     legal_filter = body.to_filter()
     expr = legal_filter.to_milvus_expr() if legal_filter else None
+    # 多取一条用来探「还有没有下一页」，所以取 window+1 条候选、再切本页。
+    fetch_k = body.window() + 1
+    # 默认口径会剔掉已废止/已失效（约 12%），因此过采样候选，否则过滤后一页可能凑不满。
+    if not body.include_invalid:
+        fetch_k = min(_MAX_PAGINATION_WINDOW, fetch_k * _INVALID_OVERSAMPLE)
+    drop_invalid = not body.include_invalid
 
     if body.mode == "direct":
         manager = get_model_manager()
         retriever = VectorRetriever(manager.embedder, _get_milvus())
-        results = await retriever.search(body.query, kb_id, top_k=body.top_k, expr=expr)
-        items = await _build_result_items(results, global_kb_ids=global_kb_ids)
+        ranked = await retriever.search(body.query, kb_id, top_k=fetch_k, expr=expr)
+        built, dropped = await _build_result_items(
+            ranked, global_kb_ids=global_kb_ids, drop_invalid=drop_invalid
+        )
+        items, has_more = _slice_page_items(built, body)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return RetrievalTestResponse(
             query=body.query,
@@ -273,6 +438,11 @@ async def _run_single_kb_retrieval(
             elapsed_ms=elapsed_ms,
             results=items,
             trace=None,
+            page=body.page,
+            page_size=body.top_k,
+            has_more=has_more,
+            fallback_reason=fallback_reason,
+            filtered_invalid_count=dropped,
         )
 
     # hybrid 模式：三路 + 可选图谱第四路（由工厂按门控注入）+ 链路追踪。
@@ -280,12 +450,14 @@ async def _run_single_kb_retrieval(
     # 防幻觉机制，会把短/泛 query 的低分但相关结果连兜底一起滤空；召回接口应返回 rerank 排序
     # 后的 top_k，由调用方参考 rerank_score 自行取舍。
     hybrid_retriever = await build_hybrid_retriever()
-    results, trace_data = await hybrid_retriever.search_with_trace(
-        body.query, kb_id, top_k=body.top_k, expr=expr, apply_rerank_filter=False
+    ranked, trace_data = await hybrid_retriever.search_with_trace(
+        body.query, kb_id, top_k=fetch_k, expr=expr, apply_rerank_filter=False
     )
-    items = await _build_result_items(
-        results, trace_data.get("per_result"), global_kb_ids=global_kb_ids
+    built, dropped = await _build_result_items(
+        ranked, trace_data.get("per_result"), global_kb_ids=global_kb_ids,
+        drop_invalid=drop_invalid,
     )
+    items, has_more = _slice_page_items(built, body)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     trace = RetrievalTrace(
@@ -299,6 +471,11 @@ async def _run_single_kb_retrieval(
         elapsed_ms=elapsed_ms,
         results=items,
         trace=trace,
+        page=body.page,
+        page_size=body.top_k,
+        has_more=has_more,
+        fallback_reason=fallback_reason,
+        filtered_invalid_count=dropped,
     )
 
 
@@ -307,6 +484,8 @@ async def _run_multi_source_retrieval(
     kb_ids: list[str],
     identity: IdentityContext,
     global_kb_ids: list[str] | None = None,
+    *,
+    fallback_reason: str | None = None,
 ) -> RetrievalTestResponse:
     """多库联合检索：走 ``MultiKBRetriever`` 混合召回。
 
@@ -329,19 +508,28 @@ async def _run_multi_source_retrieval(
             elapsed_ms=elapsed_ms,
             results=[],
             trace=None,
+            page=body.page,
+            page_size=body.top_k,
+            fallback_reason=fallback_reason,
         )
 
     hybrid_retriever = await build_hybrid_retriever()
     multi_kb = MultiKBRetriever(hybrid_retriever)
     # 纯检索召回接口跳过 rerank 软阈值过滤（与单库路径一致）：召回接口返回 rerank 排序结果，
     # 不做问答链路的防幻觉软阈值截断，避免短/泛 query 被兜底也救不回而返回空。
+    # 与单库路径同口径：多取一条探是否有下一页；默认口径再按效力状态过采样。
+    multi_fetch_k = body.window() + 1
+    if not body.include_invalid:
+        multi_fetch_k = min(_MAX_PAGINATION_WINDOW, multi_fetch_k * _INVALID_OVERSAMPLE)
     multi_result = await multi_kb.search(
-        body.query, kb_configs, top_k=body.top_k, tenant_id=identity.tenant_id,
+        body.query, kb_configs, top_k=multi_fetch_k, tenant_id=identity.tenant_id,
         filters=body.to_filter(), apply_rerank_filter=False,
     )
-    items = await _build_result_items(
-        multi_result.results, global_kb_ids=global_kb_ids
+    built, dropped = await _build_result_items(
+        multi_result.results, global_kb_ids=global_kb_ids,
+        drop_invalid=not body.include_invalid,
     )
+    items, has_more = _slice_page_items(built, body)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     return RetrievalTestResponse(
@@ -353,6 +541,11 @@ async def _run_multi_source_retrieval(
         trace=None,
         degraded=multi_result.degraded,
         failed_source_count=len(multi_result.failed_kb_ids),
+        page=body.page,
+        page_size=body.top_k,
+        has_more=has_more,
+        fallback_reason=fallback_reason,
+        filtered_invalid_count=dropped,
     )
 
 
@@ -395,11 +588,16 @@ async def _build_result_items(
     results: list[RetrievalResult],
     per_result: dict | None = None,
     global_kb_ids: list[str] | None = None,
-) -> list[RetrievalResultItem]:
+    *,
+    drop_invalid: bool = False,
+) -> tuple[list[RetrievalResultItem], int]:
     """将检索结果转换为响应格式，附带文件名与（可选的）链路分数信号。
 
     ``source_type`` 恒为 ``knowledge_base``：会话附件来源已随会话链路移除（见方案 D7）。
     原件获取由第三方前端按 ``doc_id`` 自行调用 ``/api/documents/{doc_id}/raw``，本响应不返回原件 URL。
+
+    ``drop_invalid=True`` 时剔除效力状态为「已废止 / 已失效」的条目（默认检索口径），并返回
+    被剔除的条数供响应回显。
     """
     doc_ids = list({r.doc_id for r in results})
     doc_filenames: dict[str, str] = {}
@@ -454,6 +652,7 @@ async def _build_result_items(
     global_set = set(global_kb_ids or [])
 
     items: list[RetrievalResultItem] = []
+    dropped = 0
     for r in results:
         trace_entry = (per_result or {}).get(r.chunk_id, {})
         source_type = "knowledge_base"
@@ -477,6 +676,10 @@ async def _build_result_items(
             kb_id = chunk_kb.get(r.chunk_id)
             metadata["source"] = "global" if kb_id in global_set else "personal"
 
+        if drop_invalid and _is_invalid_legal(metadata):
+            dropped += 1
+            continue
+
         items.append(
             RetrievalResultItem(
                 chunk_id=r.chunk_id,
@@ -494,4 +697,4 @@ async def _build_result_items(
                 metadata=metadata,
             )
         )
-    return items
+    return items, dropped

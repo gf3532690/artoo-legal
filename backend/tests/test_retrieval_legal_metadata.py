@@ -79,9 +79,9 @@ async def test_result_carries_prd_fields_and_derived_article_id(monkeypatch) -> 
         chunks=[_Row(id="ck-1", kb_id="kb-global", chunk_metadata=dict(_LEGAL_METADATA))],
     )
 
-    items = await retrieval_api._build_result_items(
-        [_result()], global_kb_ids=["kb-global"]
-    )
+    items, _ = await retrieval_api._build_result_items(
+            [_result()], global_kb_ids=["kb-global"]
+        )
 
     assert len(items) == 1
     metadata = items[0].metadata
@@ -111,7 +111,7 @@ async def test_region_fields_are_exposed_for_local_regulations(monkeypatch) -> N
         })],
     )
 
-    items = await retrieval_api._build_result_items([_result(chunk_id="ck-9", doc_id="doc-9")])
+    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-9", doc_id="doc-9")])
 
     assert items[0].metadata["province"] == "江西省"
     assert items[0].metadata["city"] == "景德镇市"
@@ -130,7 +130,7 @@ async def test_article_less_document_gets_no_article_id(monkeypatch) -> None:
         })],
     )
 
-    items = await retrieval_api._build_result_items([_result(chunk_id="ck-2", doc_id="doc-2")])
+    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-2", doc_id="doc-2")])
 
     assert "article_id" not in items[0].metadata
     assert items[0].metadata["law_type"] == "修正案"
@@ -145,7 +145,7 @@ async def test_empty_metadata_values_are_not_emitted(monkeypatch) -> None:
         chunks=[_Row(id="ck-3", kb_id="kb-1", chunk_metadata={"law_name": "某条例"})],
     )
 
-    items = await retrieval_api._build_result_items([_result(chunk_id="ck-3", doc_id="doc-3")])
+    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-3", doc_id="doc-3")])
 
     metadata = items[0].metadata
     assert metadata == {"law_name": "某条例"}

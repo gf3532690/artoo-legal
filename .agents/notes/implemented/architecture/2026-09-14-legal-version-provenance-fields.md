@@ -20,7 +20,7 @@ came from, was unavailable to any consumer. Measured on the crawl corpus (29,957
   heuristic one after the fact.
 
 The companion note
-[Authoritative legal metadata from docx properties](2026-09-14-docx-embedded-legal-metadata.md)
+[Authoritative legal metadata from docx properties](../feature/2026-09-14-docx-embedded-legal-metadata.md)
 already reads eight fields from `docProps` and deliberately consumed only three,
 because the remaining five are new persisted keys.
 
@@ -33,8 +33,12 @@ new keys per child chunk: those five plus `meta_source`.
 - `effective_date`: property first, then a body fallback that matches
   「自…起施行」 and takes the **last** match — the 施行 clause belongs to 附则 at
   the end of the statute.
-- `validity_status`: stored as the raw integer. The producer's enum is
-  undocumented, so nothing interprets it.
+- `validity_status`: stored as the raw integer. The producer's enum was
+  undocumented at the time, so nothing here interprets or selects on it. The
+  definition has since been obtained from the data source's dictionary and is
+  recorded in
+  [Recall excludes repealed and lapsed statutes by default](../feature/2026-09-15-legal-exclude-repealed-by-default.md);
+  ingestion still stores the value verbatim.
 - `law_type`, `external_id`, `source_code`: property-only. The body contains no
   equivalent information.
 - `meta_source` (`rule` / `docx-props` / `rule+docx`) is persisted alongside the
@@ -65,7 +69,12 @@ text while the property identifies the version the file contains.
 **Interpreting `validity_status` into a `legal_status` enum now.** Rejected: only
 two values have evidence — `0` for `修改、废止的决定` (1,902/1,902) and `3` for
 `宪法` and `修正案` (19/19). Storing the raw integer keeps the option open
-without asserting a meaning the producer never documented.
+without asserting a meaning the producer never documented. **The evidence
+premise has since been superseded** — the full six-value enum is now documented
+and retrieval interprets its two 「no longer in force」 values, recorded in
+[Recall excludes repealed and lapsed statutes by default](../feature/2026-09-15-legal-exclude-repealed-by-default.md).
+The decision recorded here — persist the raw integer, do not normalise it at
+ingestion — stands.
 
 **Exposing the new fields in the retrieval response.** Rejected for this change:
 nothing filters or ranks on them, and every response field is a downstream
@@ -96,8 +105,10 @@ informative and must not be deleted on the strength of that status alone.
 
 `effective_date` stays null for roughly 22% of documents — the property is absent
 and no 施行 clause is found — and is deliberately left unknown rather than
-guessed. `validity_status` is likewise uninterpreted: a consumer that needs
-「current or not」 must consult the producer's enum definition first.
+guessed. `validity_status` is stored raw and nothing in this note's code path
+interprets it: a consumer that needs 「current or not」 should read the enum from
+[Recall excludes repealed and lapsed statutes by default](../feature/2026-09-15-legal-exclude-repealed-by-default.md)
+rather than infer a meaning from the integer.
 
 `.doc` inputs lose all six fields, because LibreOffice conversion drops
 `docProps`; the current corpus is 100% `.docx`.

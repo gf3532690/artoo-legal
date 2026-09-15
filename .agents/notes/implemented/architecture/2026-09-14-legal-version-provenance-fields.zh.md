@@ -15,7 +15,7 @@ Status: implemented
 - 入库核对事后无法区分"权威值"与"启发式值"。
 
 配套记录
-[法条文档级元数据改用 docx 内嵌属性](2026-09-14-docx-embedded-legal-metadata.zh.md)
+[法条文档级元数据改用 docx 内嵌属性](../feature/2026-09-14-docx-embedded-legal-metadata.zh.md)
 已经能从 `docProps` 读出 8 个字段，但当时只消费 3 个——因为其余 5 个是新的持久化键。
 
 ## Decision
@@ -26,7 +26,10 @@ Status: implemented
 
 - `effective_date`：属性优先，其次正文兜底——匹配「自…起施行」并取**最后一个**
   匹配，因为施行条款按体例在正文末尾的附则。
-- `validity_status`：原样存整数。数据源没有给出枚举定义，因此不做任何解释。
+- `validity_status`：原样存整数。当时数据源没有给出枚举定义，因此这里不做任何解释、
+  也不据此做任何筛选。该定义后来从数据源自己的字典里拿到了，记录在
+  [检索默认排除已废止与已失效的法条](../feature/2026-09-15-legal-exclude-repealed-by-default.zh.md)；
+  入库仍然逐字存该值。
 - `law_type` / `external_id` / `source_code`：只来自属性，正文里没有对应信息。
 - `meta_source`（`rule` / `docx-props` / `rule+docx`）与既有排查字段 `has_toc`
   并列落库，让全量核对能区分权威值与启发式值。
@@ -47,7 +50,10 @@ Status: implemented
 
 **现在就把 `validity_status` 解释成 `legal_status` 枚举。** 否决：只有两个取值有
 证据——`修改、废止的决定` 全是 `0`（1,902/1,902）、`宪法` 与 `修正案` 全是 `3`
-（19/19）。存原值可以保留后路，又不必断言数据源从未定义过的含义。
+（19/19）。存原值可以保留后路，又不必断言数据源从未定义过的含义。**该前提后来被取代**：
+完整的六值枚举现在有据可查，检索也解释了其中两个"已不具法律效力"的取值，记录在
+[检索默认排除已废止与已失效的法条](../feature/2026-09-15-legal-exclude-repealed-by-default.zh.md)。
+此处记录的决定——存原值、不在入库时归一化——依然成立。
 
 **把这批新字段下发到检索响应。** 本次否决：没有任何过滤或排序用到它们，而每个响应
 字段都是对外契约。响应形状保持不变。
@@ -71,8 +77,10 @@ Status: implemented
 这个状态删除**。
 
 `effective_date` 对约 22% 的文档仍为空（属性缺失且找不到施行条款），这是有意留空
-而不是猜一个值。`validity_status` 同样未被解释：需要"是否现行有效"的消费方必须先
-拿到数据源的枚举定义。
+而不是猜一个值。`validity_status` 原样存储，本 note 的代码路径不解释它：需要"是否现行
+有效"的消费方应当去
+[检索默认排除已废止与已失效的法条](../feature/2026-09-15-legal-exclude-repealed-by-default.zh.md)
+读枚举，而不是从整数里推断含义。
 
 `.doc` 输入会丢掉全部 6 个字段，因为 LibreOffice 转换会丢掉 `docProps`；当前语料
 100% 是 `.docx`。

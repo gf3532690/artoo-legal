@@ -12,7 +12,9 @@ import {
 } from 'lucide-react'
 import {
   retrievalApi,
+  legalApi,
   knowledgeBaseApi,
+  type LegalArticleDetail,
   type RetrievalResultItem,
   type RetrievalTestResponse,
 } from '@/lib/api'
@@ -55,13 +57,50 @@ const MODES = [
   { value: 'hybrid', label: '混合检索' },
 ]
 
+// 检索能力选择：每一项对应一个真实对外接口（页面上的选择器本质就是切换接口）。
+// - 关键词检索 / 精确检索 都走 POST /api/retrieval/search，区别是 match_mode；
+// - 法条详情走 GET /api/legal/articles/{article_id}，输入的是 article_id 而不是查询词。
+const CAPABILITIES = [
+  {
+    value: 'search' as const,
+    label: '关键词检索',
+    endpoint: 'POST /api/retrieval/search',
+    inputHint: '输入检索查询（关键词 / 法条编号 / 正文片段），回车开始检索…',
+    needsKb: true,
+  },
+  {
+    value: 'exact' as const,
+    label: '精确检索',
+    endpoint: 'POST /api/retrieval/search · match_mode=exact',
+    inputHint: '输入「法名 + 条号」，如：民法典第一条',
+    needsKb: true,
+  },
+  {
+    value: 'article' as const,
+    label: '法条详情',
+    endpoint: 'GET /api/legal/articles/{article_id}',
+    inputHint: '粘贴检索结果里的 metadata.article_id，如：<doc_id>:146',
+    needsKb: false,
+  },
+]
+
+type Capability = (typeof CAPABILITIES)[number]['value']
+
+// 两种能力返回两种形状，用判别联合让渲染端各自收窄。
+type QueryResult =
+  | { kind: 'search'; res: RetrievalTestResponse }
+  | { kind: 'article'; detail: LegalArticleDetail }
+
 // 检索测试页面（纯检索，不经过 LLM 生成；用于调参与召回质量验证）
 function Retrieval() {
+  const [capability, setCapability] = useState<Capability>('search')
   const [query, setQuery] = useState('')
   const [selectedKb, setSelectedKb] = useState('')
   const [mode, setMode] = useState('hybrid')
   const [topK, setTopK] = useState(10)
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
+
+  const activeCapability = CAPABILITIES.find((c) => c.value === capability)!
 
   // 获取法条库列表
   const { data: knowledgeBases = [] } = useQuery({
@@ -70,25 +109,37 @@ function Retrieval() {
       knowledgeBaseApi.list({ page_size: 100 }).then((res) => res.items as KnowledgeBaseItem[]),
   })
 
-  // 检索请求
+  // 按能力走各自的真实接口
   const searchMutation = useMutation({
-    mutationFn: () =>
-      retrievalApi.test({
-        query,
-        knowledge_base_id: selectedKb,
-        mode,
-        top_k: topK,
-      }) as Promise<RetrievalTestResponse>,
+    mutationFn: async (): Promise<QueryResult> => {
+      if (capability === 'article') {
+        return { kind: 'article', detail: await legalApi.article(query.trim()) }
+      }
+      return {
+        kind: 'search',
+        res: await retrievalApi.search({
+          query,
+          knowledge_base_id: selectedKb,
+          // exact 只认「法名 + 条号」，mode / top_k 对它没有意义，直接不传。
+          ...(capability === 'exact'
+            ? { match_mode: 'exact' as const }
+            : { match_mode: 'semantic' as const, mode, top_k: topK }),
+        }),
+      }
+    },
   })
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
-    if (!query.trim() || !selectedKb) return
+    if (!query.trim()) return
+    if (activeCapability.needsKb && !selectedKb) return
     setExpandedItems(new Set())
     searchMutation.mutate()
   }
 
-  const data = searchMutation.data
+  const outcome = searchMutation.data
+  const data = outcome?.kind === 'search' ? outcome.res : undefined
+  const detail = outcome?.kind === 'article' ? outcome.detail : undefined
   const results: RetrievalResultItem[] = data?.results || []
   const isPending = searchMutation.isPending
   const isError = searchMutation.isError
@@ -116,18 +167,45 @@ function Retrieval() {
 
         {/* 检索面板 */}
         <form onSubmit={handleSearch} className="space-y-3 mb-8">
+          {/* 能力选择：每一项对应一个真实对外接口 */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="inline-flex h-9 items-center rounded-lg bg-muted/60 p-0.5">
+              {CAPABILITIES.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => {
+                    setCapability(c.value)
+                    // 切换能力时清掉上一轮结果，避免把 A 能力的结果当 B 能力的输出看。
+                    searchMutation.reset()
+                  }}
+                  className={`h-8 px-3.5 text-sm rounded-md transition-colors cursor-pointer ${
+                    capability === c.value
+                      ? 'bg-card text-foreground shadow-sm font-medium'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <code className="text-[11px] font-mono text-muted-foreground/80">
+              {activeCapability.endpoint}
+            </code>
+          </div>
+
           {/* 搜索栏 */}
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="输入检索查询，回车开始检索…"
+              placeholder={activeCapability.inputHint}
               className="h-12 pl-11 pr-28 text-[15px] rounded-xl shadow-sm border-border/70 focus-visible:ring-2 focus-visible:ring-primary/30"
             />
             <Button
               type="submit"
-              disabled={!query.trim() || !selectedKb || isPending}
+              disabled={!query.trim() || (activeCapability.needsKb && !selectedKb) || isPending}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 h-9 gap-1.5 rounded-lg cursor-pointer"
             >
               {isPending ? (
@@ -142,60 +220,67 @@ function Retrieval() {
           {/* 参数行 */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* 法条库 */}
-            <Select value={selectedKb} onValueChange={setSelectedKb}>
-              <SelectTrigger className="h-9 w-[200px] text-sm rounded-lg bg-card">
-                <SelectValue placeholder="选择法条库" />
-              </SelectTrigger>
-              <SelectContent>
-                {knowledgeBases.map((kb) => (
-                  <SelectItem key={kb.id} value={kb.id}>
-                    {kb.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {activeCapability.needsKb && (
+              <Select value={selectedKb} onValueChange={setSelectedKb}>
+                <SelectTrigger className="h-9 w-[200px] text-sm rounded-lg bg-card">
+                  <SelectValue placeholder="选择法条库" />
+                </SelectTrigger>
+                <SelectContent>
+                  {knowledgeBases.map((kb) => (
+                    <SelectItem key={kb.id} value={kb.id}>
+                      {kb.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
-            {/* 模式分段控件 */}
-            <div className="inline-flex h-9 items-center rounded-lg bg-muted/60 p-0.5">
-              {MODES.map((m) => (
-                <button
-                  key={m.value}
-                  type="button"
-                  onClick={() => setMode(m.value)}
-                  className={`h-8 px-3.5 text-sm rounded-md transition-colors cursor-pointer ${
-                    mode === m.value
-                      ? 'bg-card text-foreground shadow-sm font-medium'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
+            {/* 模式与 Top-K 只对关键词检索有意义：exact 只认「法名 + 条号」，两者都不参与 */}
+            {capability === 'search' && (
+              <>
+                {/* 模式分段控件 */}
+                <div className="inline-flex h-9 items-center rounded-lg bg-muted/60 p-0.5">
+                  {MODES.map((m) => (
+                    <button
+                      key={m.value}
+                      type="button"
+                      onClick={() => setMode(m.value)}
+                      className={`h-8 px-3.5 text-sm rounded-md transition-colors cursor-pointer ${
+                        mode === m.value
+                          ? 'bg-card text-foreground shadow-sm font-medium'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
 
-            {/* Top-K 步进器 */}
-            <div className="inline-flex h-9 items-center rounded-lg bg-card border border-border/70 overflow-hidden">
-              <span className="pl-3 pr-2 text-xs text-muted-foreground select-none">Top-K</span>
-              <button
-                type="button"
-                onClick={() => setTopK((v) => Math.max(1, v - 1))}
-                disabled={topK <= 1}
-                className="h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="减少 Top-K"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <span className="w-8 text-center text-sm font-medium tabular-nums">{topK}</span>
-              <button
-                type="button"
-                onClick={() => setTopK((v) => Math.min(100, v + 1))}
-                disabled={topK >= 100}
-                className="h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="增加 Top-K"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
+                {/* Top-K 步进器 */}
+                <div className="inline-flex h-9 items-center rounded-lg bg-card border border-border/70 overflow-hidden">
+                  <span className="pl-3 pr-2 text-xs text-muted-foreground select-none">Top-K</span>
+                  <button
+                    type="button"
+                    onClick={() => setTopK((v) => Math.max(1, v - 1))}
+                    disabled={topK <= 1}
+                    className="h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label="减少 Top-K"
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="w-8 text-center text-sm font-medium tabular-nums">{topK}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTopK((v) => Math.min(100, v + 1))}
+                    disabled={topK >= 100}
+                    className="h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label="增加 Top-K"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </form>
 
@@ -209,20 +294,36 @@ function Retrieval() {
           </div>
         )}
 
+        {/* exact 未命中而回退到语义召回时的说明（服务端不静默降级，这里如实展示） */}
+        {!isPending && data?.fallback_reason && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5 mb-6">
+            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-700">
+              精确检索未命中，已回退为语义召回：{data.fallback_reason}
+            </p>
+          </div>
+        )}
+
         {/* 骨架屏 */}
         {isPending && <RetrievalResultsSkeleton count={4} />}
 
+        {/* 法条详情 */}
+        {!isPending && detail && <ArticleDetailPanel detail={detail} />}
+
         {/* 检索链路追踪（仅 hybrid 模式） */}
-        {!isPending && data?.trace && (
+        {!isPending && !detail && data?.trace && (
           <RetrievalTracePanel trace={data.trace} elapsedMs={data.elapsed_ms} total={data.total} />
         )}
 
         {/* 结果区头部（direct 模式或无 trace 时） */}
-        {!isPending && results.length > 0 && !data?.trace && (
+        {!isPending && !detail && results.length > 0 && !data?.trace && (
           <div className="flex items-baseline justify-between mb-4">
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold tabular-nums tracking-tight">{results.length}</span>
               <span className="text-sm text-muted-foreground">条结果</span>
+              {data?.has_more && (
+                <span className="text-xs text-muted-foreground/80">（候选池中还有更多）</span>
+              )}
             </div>
             {data?.elapsed_ms !== undefined && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground tabular-nums">
@@ -234,7 +335,7 @@ function Retrieval() {
         )}
 
         {/* 结果列表 */}
-        {!isPending && results.length > 0 && (
+        {!isPending && !detail && results.length > 0 && (
           <div className="space-y-2.5 animate-in fade-in-0 duration-500">
             {results.map((result, idx) => (
               <ResultCard
@@ -250,7 +351,7 @@ function Retrieval() {
         )}
 
         {/* 空结果 */}
-        {!isPending && isSuccess && results.length === 0 && (
+        {!isPending && isSuccess && !detail && results.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-16 h-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-4">
               <Search className="h-7 w-7 text-muted-foreground/60" />
@@ -277,6 +378,62 @@ function Retrieval() {
 // ============================================================
 // 单条结果卡片
 // ============================================================
+
+// 法条详情（GET /api/legal/articles/{article_id}）：条文全文 + 元数据。
+// 不展示修订历史与关联司法解释——语料里没有这两类数据，接口也不返回。
+function ArticleDetailPanel({ detail }: { detail: LegalArticleDetail }) {
+  const chips = [
+    detail.law_type,
+    detail.province && (detail.city ? `${detail.province} / ${detail.city}` : detail.province),
+    detail.source === 'global' ? '全局法条库' : detail.source === 'personal' ? '个人库' : null,
+  ].filter(Boolean) as string[]
+
+  const meta: [string, string][] = ([
+    ['发布机关', detail.issuing_authority],
+    ['发布日期', detail.publish_date],
+    ['施行日期', detail.effective_date],
+    ['时效状态', detail.validity_status === null ? null : `validity_status = ${detail.validity_status}`],
+    ['来源文件', detail.filename],
+    ['article_id', detail.article_id],
+  ] as [string, string | null][]).filter(([, v]) => !!v) as [string, string][]
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card shadow-sm animate-in fade-in-0 duration-500">
+      <div className="p-4">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-sm font-medium text-foreground/90">
+            {detail.law_name || detail.filename}
+          </span>
+          {detail.article_label && (
+            <span className="text-sm font-semibold text-primary">{detail.article_label}</span>
+          )}
+          {chips.map((chip) => (
+            <span
+              key={chip}
+              className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 text-muted-foreground bg-muted/40 ring-border/60"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+
+        <p className="text-[15px] leading-7 whitespace-pre-wrap text-foreground/90">
+          {detail.content}
+        </p>
+
+        <div className="mt-4 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+          {meta.map(([k, v]) => (
+            <div key={k} className="flex items-baseline gap-2 text-xs min-w-0">
+              <span className="text-muted-foreground/70 shrink-0">{k}</span>
+              <span className="text-foreground/80 truncate">{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ResultCard({
   result,

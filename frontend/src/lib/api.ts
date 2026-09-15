@@ -377,14 +377,68 @@ export interface RetrievalTestResponse {
   elapsed_ms: number
   results: RetrievalResultItem[]
   trace: RetrievalTrace | null
+  degraded: boolean
+  failed_source_count: number
+  // 分页：total 是"本次返回条数"，翻页判据看 has_more（服务端多取一条探出来的事实）。
+  page: number
+  page_size: number
+  has_more: boolean
+  // 实际生效的检索模式；exact 没命中会退回 semantic 并在 fallback_reason 说明原因。
+  match_mode: string
+  fallback_reason: string | null
+}
+
+// 与后端 RetrievalTestRequest 对齐。法条库部署下检索范围可省略——全局法条库会自动并入，
+// 这也是第三方集成的实际用法（见 artoo-open-api.md 第 0 节差异 1）。
+export interface RetrievalSearchRequest {
+  query: string
+  knowledge_base_id?: string
+  kb_ids?: string[]
+  mode?: string
+  top_k?: number
+  page?: number
+  match_mode?: 'semantic' | 'exact'
+  law_levels?: string[]
+  province?: string
+  city?: string
+}
+
+// 法条详情（GET /api/legal/articles/{article_id}）。
+// content 是条文全文（父块），matched_content 是命中的子块；超长条文由服务端两级拼回。
+export interface LegalArticleDetail {
+  article_id: string
+  doc_id: string
+  kb_id: string
+  filename: string
+  content: string
+  matched_content: string
+  law_name: string | null
+  article_number: number | null
+  article_label: string | null
+  chapter: string | null
+  law_type: string | null
+  province: string | null
+  city: string | null
+  issuing_authority: string | null
+  publish_date: string | null
+  effective_date: string | null
+  validity_status: number | null
+  source: string | null
 }
 
 export const retrievalApi = {
-  test: (data: { query: string; knowledge_base_id: string; mode?: string; top_k?: number }) =>
-    request<RetrievalTestResponse>('/retrieval/test', {
+  // 走对外召回路径 /retrieval/search（与第三方集成同一接口），不再走 /retrieval/test——
+  // 两者底层实现相同，但测试页应当验证"真实对外接口"的行为。
+  search: (data: RetrievalSearchRequest) =>
+    request<RetrievalTestResponse>('/retrieval/search', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+}
+
+export const legalApi = {
+  article: (articleId: string) =>
+    request<LegalArticleDetail>(`/legal/articles/${encodeURIComponent(articleId)}`),
 }
 
 // API Key 相关接口

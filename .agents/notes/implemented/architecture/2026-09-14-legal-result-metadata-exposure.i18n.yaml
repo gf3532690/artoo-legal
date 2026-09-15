@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/architecture/2026-09-14-legal-result-metadata-exposure.md .agents/notes/implemented/architecture/2026-09-14-legal-result-metadata-exposure.zh.md
-2026-09-14-legal-result-metadata-exposure.md: 7bb8f58165555fe2b1a89d2af246a0e3473b67df
-2026-09-14-legal-result-metadata-exposure.zh.md: f1b3e68050d4267238846009c302db35bd3fd511
+2026-09-14-legal-result-metadata-exposure.md: 4924e75f16acd8753de2b68e2833af718e6cf7c7
+2026-09-14-legal-result-metadata-exposure.zh.md: d4a013515ed9e555aed2d880cb112c805dc0a6d7

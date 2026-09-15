@@ -22,6 +22,7 @@ from app.auth.kb_authz import (
     kb_authorization_decision,
 )
 from app.schema.db import KnowledgeBase, KnowledgeBaseGrant
+from app.storage.database import async_session
 
 
 async def _load_grants_for_kb(session: AsyncSession, kb_id: str) -> list[GrantView]:
@@ -73,6 +74,27 @@ async def authorize_requested_kbs(
             if decision.http_status == 403:
                 raise PermissionDeniedError()
             raise CrossTenantError()
+
+
+async def authorize_content_read(
+    identity: IdentityContext, requested_kb_ids: list[str]
+) -> None:
+    """触达业务正文前的统一闸门：超管内容边界 + 逐库读授权。
+
+    超管默认不可读业务正文（``content_view_boundary_open`` 打开才放行），这是平台级策略；
+    随后按 KB 逐个走同一套读授权。检索与法条详情共用它，避免两处各写一遍边界判定——
+    边界一旦只改了一边，就会变成"检索查不到、详情却能读到"的信息泄露。
+    """
+    from app.config import get_settings
+    from app.api.errors import PermissionDeniedError
+
+    if identity.is_super_admin and not get_settings().content_view_boundary_open:
+        raise PermissionDeniedError("超级管理员默认不可查看业务内容正文")
+    if requested_kb_ids:
+        async with async_session() as session:
+            await authorize_requested_kbs(
+                session, identity, requested_kb_ids, KbAccessEnum.READ
+            )
 
 
 async def assemble_allowed_kb_ids(
