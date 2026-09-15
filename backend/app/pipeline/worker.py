@@ -36,6 +36,10 @@ logger = logging.getLogger("pipeline.worker")
 # 不可重试的错误类型：文件不存在、参数错误、权限不足、任务取消
 NON_RETRYABLE_ERRORS = (FileNotFoundError, ValueError, PermissionError, CancelledError)
 
+# 并发额度用满时的轮询间隔（秒）。只影响"等一个槽位空出来"的等待粒度，
+# 不影响消费本身（队列空时仍走 consume 的长轮询）。
+_CAPACITY_POLL_SECONDS = 0.2
+
 
 class PipelineWorker:
     """管道工作进程，消费 Redis Stream 任务
@@ -127,6 +131,18 @@ class PipelineWorker:
             if time.monotonic() - self._last_claim_at >= self._claim_interval:
                 await self._reclaim_orphan_tasks()
 
+            # 只在真有空闲并发额度时才读新消息。
+            #
+            # 「读一条消息」就是让它进入 PEL 成为未确认消息，所以读到多少条，PEL 里就压着
+            # 多少条。旧实现无论并发是否吃满都连着读，整条队列会瞬间变成 PEL；而 PEL 里
+            # idle 超过 _claim_min_idle_ms 的消息会被当作孤儿重新认领，认领一次投递次数
+            # +1，涨到 _claim_max_delivery 就被判为毒消息丢进 DLQ。于是"只是在排队"的
+            # 文档会被批量误杀——实测一轮 22,036 份的入库因此丢掉 7,366 份。
+            # 额度就是并发上限：在途任务已经吃满时先不读，PEL 只承载真正在跑的文档。
+            if len(self._tasks) >= self._max_concurrent:
+                await asyncio.sleep(_CAPACITY_POLL_SECONDS)
+                continue
+
             try:
                 # 快道：常规/小文件，吃满 max_concurrent
                 messages = await self._queue.consume(
@@ -173,13 +189,22 @@ class PipelineWorker:
             await self._reclaim_from_queue(self._slow_queue)
 
     async def _reclaim_from_queue(self, queue: TaskQueue) -> None:
-        """从指定队列认领孤儿消息并按所属队列重新派发处理。"""
+        """从指定队列认领孤儿消息并按所属队列重新派发处理。
+
+        认领同样受并发额度约束：认领多少条就要起多少个等待中的任务，而且认领本身会让
+        投递次数 +1。额度用满时这一轮直接不认领——既不给队列加虚假的投递次数，也不会把
+        认领到的消息晾在 PEL 里等下一次回收。
+        """
+        budget = self._max_concurrent - len(self._tasks)
+        if budget <= 0:
+            return
         try:
             pending = await queue.claim_pending(
                 self._consumer_name,
                 min_idle_ms=self._claim_min_idle_ms,
                 max_delivery_count=self._claim_max_delivery,
                 on_poison_pill=self._on_poison_pill,
+                limit=budget,
             )
         except Exception as e:
             logger.warning("Failed to claim pending tasks: %s", e)

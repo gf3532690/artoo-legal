@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/bug-fix/2026-09-15-worker-pel-backpressure.md .agents/notes/implemented/bug-fix/2026-09-15-worker-pel-backpressure.zh.md
+2026-09-15-worker-pel-backpressure.md: 11e2ee8f2fe6056a606f85d30b8cb05acd9bf8bf
+2026-09-15-worker-pel-backpressure.zh.md: 022db51f8b8e883eb2a2f6abf824ccd16de1167c

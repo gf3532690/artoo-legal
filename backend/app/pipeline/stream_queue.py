@@ -181,6 +181,7 @@ class RedisStreamQueue(Generic[T]):
         min_idle_ms: int = 60000,
         max_delivery_count: int | None = None,
         on_poison_pill: "Callable[[T, str], Awaitable[None]] | None" = None,
+        limit: int | None = None,
     ) -> list[tuple[str, T]]:
         """认领超时的 pending 消息（用于崩溃恢复）
 
@@ -203,16 +204,27 @@ class RedisStreamQueue(Generic[T]):
             on_poison_pill: 毒消息移入 DLQ 后的回调（async），接收 (task, 原因)。
                             队列层不依赖 DB，由调用方传入以将任务标记为 failed，
                             避免毒任务状态停留在 processing。回调异常不影响主流程。
+            limit: 本次最多认领多少条可处理消息；None 表示不限（遍历完整个 PEL）。
+                认领会让投递次数 +1，所以调用方应按当前并发额度传值——额度用满时
+                传 0 直接返回，既不认领也不虚增投递次数。
 
         Returns:
             可处理的 [(message_id, task), ...]（已剔除毒消息）
         """
         results: list[tuple[str, T]] = []
+        if limit is not None and limit <= 0:
+            # 先于 XAUTOCLAIM 返回：认领本身会使投递次数 +1，没有额度时不该碰队列。
+            return results
         start_id = "0-0"
         seen_cursors: set[str] = set()
         claimed_ids: set[str] = set()
 
         while True:
+            if limit is not None and len(results) >= limit:
+                break
+            # 每页取多少条：有额度上限时按剩余额度收窄，避免「认领 100 条只用 4 条」——
+            # 多认领的部分会平白增加投递次数，正是毒消息误判的来源之一。
+            page_count = 100 if limit is None else max(1, min(100, limit - len(results)))
             try:
                 # XAUTOCLAIM 返回 (next_start_id, [(msg_id, fields), ...], deleted_ids)
                 response = await self._redis.xautoclaim(
@@ -221,7 +233,7 @@ class RedisStreamQueue(Generic[T]):
                     consumername=consumer_name,
                     min_idle_time=min_idle_ms,
                     start_id=start_id,
-                    count=100,
+                    count=page_count,
                 )
             except (aioredis.ResponseError, aioredis.ConnectionError):
                 break

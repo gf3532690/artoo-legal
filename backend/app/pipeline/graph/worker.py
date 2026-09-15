@@ -44,8 +44,13 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from app.pipeline.queue import TaskQueue
+
     from app.storage.graph_store import GraphStore
     from app.storage.milvus_event_store import MilvusEventStore
+
+# 并发额度用满时的轮询间隔（秒）。与 app.pipeline.worker 同义：只影响"等一个槽位空出来"
+# 的等待粒度，不影响队列空时的长轮询。
+_CAPACITY_POLL_SECONDS = 0.2
 
 logger = logging.getLogger("pipeline.graph.worker")
 
@@ -138,6 +143,14 @@ class GraphExtractWorker:
             if time.monotonic() - self._last_claim_at >= self._claim_interval:
                 await self._reclaim_orphan_tasks()
 
+            # 只在真有空闲并发额度时才读新消息：读一条就等于让它进入 PEL，无条件连读会把
+            # 整条队列变成 PEL，而 PEL 里的消息会被孤儿认领反复重投、投递次数涨到上限后
+            # 被判为毒消息丢弃。理由与实测见
+            # .agents/notes/implemented/bug-fix/2026-09-15-worker-pel-backpressure.md。
+            if len(self._tasks) >= self._max_concurrent:
+                await asyncio.sleep(_CAPACITY_POLL_SECONDS)
+                continue
+
             try:
                 messages = await self._queue.consume(
                     self._consumer_name, count=1, block_ms=5000
@@ -161,12 +174,18 @@ class GraphExtractWorker:
     async def _reclaim_orphan_tasks(self) -> None:
         """认领 PEL 中 idle 超时的孤儿消息重新处理；毒消息由队列层移入 DLQ。"""
         self._last_claim_at = time.monotonic()
+        # 认领同样受并发额度约束：认领多少条就要起多少个等待中的任务，而且认领本身会让
+        # 投递次数 +1。额度用满时这一轮不认领。
+        budget = self._max_concurrent - len(self._tasks)
+        if budget <= 0:
+            return
         try:
             pending = await self._queue.claim_pending(
                 self._consumer_name,
                 min_idle_ms=self._claim_min_idle_ms,
                 max_delivery_count=self._claim_max_delivery,
                 on_poison_pill=self._on_poison_pill,
+                limit=budget,
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("[graph-worker] 回收孤儿任务失败：%s", e)
