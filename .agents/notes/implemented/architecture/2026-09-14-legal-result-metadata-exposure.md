@@ -37,6 +37,29 @@ not `null`, so clients must treat the keys as optional.
 `docs/legal-recall-implementation-plan.md` records the change from "not exposed"
 to "exposed" with a cross-link to this note.
 
+### Which date orders the versions
+
+`publish_date` is the field a caller compares to decide which of two hits is the newer
+version, and it is deliberately **not** the date printed in the body text.
+
+The two disagree for 20,234 of the corpus's 29,957 documents (68.5%), and in 20,147 of
+those the property date is the later one — e.g. body `2017-08-24` against property
+`2024-10-31`. That is the difference between "when this text was first passed" and
+"which version this file contains": the body's first parenthesised date is the passage
+date of the *original* statute, while the docx property identifies the *version*. What
+is exposed is the property value, because the property-first precedence was decided in
+[Legal version and provenance fields in chunk_metadata](2026-09-14-legal-version-provenance-fields.md).
+
+A caller that scrapes the date out of the body instead would report a 2024 version as
+2017. That trap is why the ordering between the two candidate dates is worth writing
+down: the exposed value is not "whatever date we could find", it is the one that
+answers "which of these two hits supersedes the other".
+
+Coverage decides which field carries the ordering. `publish_date` is present for 99.9%
+of documents and `effective_date` for 91.8%, so ordering keys on `publish_date`, while
+`effective_date` stays what it sounds like — when this version takes effect, the field
+that answers "what did the law say on date T".
+
 ## Alternatives considered
 
 **Keeping the fields private and making the PRD's consumers read the database.**
@@ -82,6 +105,15 @@ dictionary — `3` 现行有效 / `2` 已修改 / `1` 已废止 / `-1` 已失效
 now interprets two of its values. The recommendation to consumers is unchanged in
 shape: read the raw integer, but read its definition from that note rather than
 guessing.
+
+The retrieval test page now renders each hit's legal identity — law name, article
+label, `publish_date`, `effective_date` and the validity-status badge — instead of only
+the filename. Before that, the page showed three hits for 「民法典 第一条」
+(民法典 / 民法总则 / 民法通则) as visually indistinguishable rows even though the API had
+carried the distinguishing data from the start; the failure was in the consumer, not in
+the contract. The badge vocabulary still comes from the server
+(`GET /api/legal/validity-statuses`); the shared frontend helper
+`frontend/src/lib/legalValidity.ts` only decides colours and when to render nothing.
 
 ## Testing
 
