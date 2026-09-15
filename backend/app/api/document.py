@@ -6,7 +6,7 @@ import os
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -254,6 +254,10 @@ class DocumentResponse(BaseModel):
     # 法条库：该文档解析出的法名。人工换版时用于识别"同一部法的两份文档"。
     # 非法条文档或尚未解析完成时为 null。
     law_name: str | None = None
+    # 法条库：文档级效力状态，原样下发数据源整数枚举（标签见
+    # ``GET /api/legal/validity-statuses``）。与 ``status``（解析进度）无关：
+    # 前者说"这条法还有没有效"，后者说"这份文件解析完了没有"。
+    validity_status: int | None = None
 
 
 class ChunkResponse(BaseModel):
@@ -424,6 +428,18 @@ async def list_documents(
     folder_id: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    validity_status: Annotated[
+        list[int] | None,
+        Query(
+            description=(
+                "法条效力状态过滤，可重复传多个值（并集）。取值见 "
+                "`/api/legal/validity-statuses`：3 现行有效 / 2 已修改 / 1 已废止 / "
+                "-1 已失效 / 4 尚未生效 / 0 未标注。不传=不过滤。"
+                "注意过滤是等值匹配，因此未解析完成、非法条文档（该字段为空）"
+                "在传了本参数时不会出现在结果里。"
+            )
+        ),
+    ] = None,
     identity: IdentityContext = Depends(require_authenticated()),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -450,6 +466,10 @@ async def list_documents(
     # 只读访客：仅展示已完成文档
     if not can_write:
         cond.append(Document.status == "completed")
+    # 法条效力状态：多选按并集过滤。走 documents.validity_status 上的索引
+    # （`ix_documents_validity_status`），不去扫 chunks 的 JSON 列。
+    if validity_status:
+        cond.append(Document.validity_status.in_(validity_status))
 
     # 总数
     total = await db.scalar(select(func.count(Document.id)).where(*cond)) or 0
@@ -514,6 +534,7 @@ async def list_documents(
             source_url=d.source_url,
             created_at=d.created_at.isoformat() if d.created_at else "",
             law_name=doc_law_names.get(d.id),
+            validity_status=d.validity_status,
         )
         for d in docs
     ]
@@ -593,6 +614,7 @@ async def upload_document(
             error_message=f"该文件已存在于{location}（与 {existing_doc.filename} 内容相同）",
             chunk_count=existing_doc.chunk_count,
             created_at=existing_doc.created_at.isoformat() if existing_doc.created_at else "",
+            validity_status=existing_doc.validity_status,
         )
 
     # 写入 MinIO（权威存储）
@@ -736,6 +758,7 @@ async def import_document_from_url(
             error_message=f"该内容已存在于{location}（与 {existing_doc.filename} 相同）",
             chunk_count=existing_doc.chunk_count,
             created_at=existing_doc.created_at.isoformat() if existing_doc.created_at else "",
+            validity_status=existing_doc.validity_status,
         )
 
     # 写入 MinIO（权威存储）。
@@ -815,6 +838,7 @@ async def get_document(
         progress_message=doc.progress_message,
         source_url=doc.source_url,
         created_at=doc.created_at.isoformat() if doc.created_at else "",
+        validity_status=doc.validity_status,
     )
 
 
@@ -854,6 +878,9 @@ async def retry_document(
     doc.chunk_count = 0
     doc.progress = 0
     doc.progress_message = None
+    # 效力状态是本次解析的产物，重解析期间它已经过期——旧值留着只会让列表在
+    # 「待处理」的文档上显示一个上一轮的状态。清空，等管道跑完重新写入。
+    doc.validity_status = None
     # 重解析图谱一致性（design.md 4.6 / Req 5.2）：先自增 graph_attempt 使在途旧抽取任务
     # 失效（worker 陈旧守卫据此跳过），再异步清理该文档旧图；新内容入库完成后由
     # maybe_trigger_graph_extract 再次自增 attempt 并按新内容 seed。

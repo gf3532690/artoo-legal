@@ -481,6 +481,32 @@ curl "$BASE/api/knowledge-bases/<kb_id>/documents?page=1&page_size=20" \
 
 响应为分页结构，`items` 为 `DocumentResponse` 数组。
 
+可选参数 `validity_status`（**可重复传，多个值取并集**）按法条效力状态筛选，
+例如只看现行有效：`...&validity_status=3`；只看已废止与已失效：
+`...&validity_status=1&validity_status=-1`。取值见下表；不传即不过滤。
+
+```bash
+curl "$BASE/api/knowledge-bases/<kb_id>/documents?validity_status=3&validity_status=2" \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EU"
+```
+
+法条库的 `DocumentResponse` 会带 `validity_status`（原值整数），未解析完成、解析失败
+以及非法条文档为 `null`。注意**传了本参数时这些文档不会出现在结果里**——过滤是等值
+匹配，不是"空值也算命中"。`validity_status` 与 `status` 是两回事：`status` 说这份文件
+解析完了没有（`pending`/`processing`/`completed`/`failed`），`validity_status` 说这条法
+还有没有效。
+
+枚举（数据源字典口径，也可用 `GET /api/legal/validity-statuses` 取，返回值里带中文标签）：
+
+| 值 | 含义 |
+|---|---|
+| `3` | 现行有效 |
+| `2` | 已修改 |
+| `1` | 已废止 |
+| `-1` | 已失效 |
+| `4` | 尚未生效 |
+| `0` | 未标注 |
+
 ### 4.4 文档详情（轮询解析状态）
 
 `GET /api/documents/{doc_id}`

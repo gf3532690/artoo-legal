@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import require_authenticated
 from app.auth.identity import IdentityContext
 from app.auth.kb_scope import authorize_content_read
+from app.pipeline.legal_metadata import VALIDITY_STATUS_LABELS
 from app.retrieval.article_lookup import load_article_rows, split_article_id
 from app.retrieval.legal_scope import resolve_global_legal_kb_ids
 from app.storage.database import async_session
@@ -48,6 +49,33 @@ class LegalArticleDetail(BaseModel):
     effective_date: str | None = None
     validity_status: int | None = None
     source: str | None = Field(default=None, description="global / personal；无法判定时不返回")
+
+
+class ValidityStatusOption(BaseModel):
+    """效力状态枚举的一项：落库与过滤用的原值 + 展示名。"""
+
+    value: int = Field(description="落库与过滤用的原始整数")
+    label: str = Field(description="展示名，如「现行有效」")
+
+
+@router.get("/validity-statuses", response_model=list[ValidityStatusOption])
+async def list_validity_statuses(
+    identity: IdentityContext = Depends(require_authenticated()),
+) -> list[ValidityStatusOption]:
+    """法条效力状态枚举（数据源字典口径）。
+
+    给前端建筛选项、并把列表结果里的整数渲染成中文标签用，省得枚举在两种语言里各抄一份
+    ——这个枚举已经被读反过一次（``0`` 是未标注，``-1`` 才是已失效）。
+
+    顺序是「现行有效 → 已修改 → 尚未生效 → 未标注 → 已废止 → 已失效」，即从最可能想要
+    的排到默认可被排除的，而不是按数值大小。
+    """
+    del identity  # 只用于鉴权
+    preferred = [3, 2, 4, 0, 1, -1]
+    values = [v for v in preferred if v in VALIDITY_STATUS_LABELS]
+    # 常量表里新增了取值而这里忘了排序时，仍然下发，不静默丢掉
+    values += [v for v in VALIDITY_STATUS_LABELS if v not in values]
+    return [ValidityStatusOption(value=v, label=VALIDITY_STATUS_LABELS[v]) for v in values]
 
 
 @router.get("/articles/{article_id}", response_model=LegalArticleDetail)
