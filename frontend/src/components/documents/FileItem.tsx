@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { documentApi } from '@/lib/api'
+import { validityLabel, validityTone } from '@/lib/legalValidity'
 
 // 文档数据类型
 export interface DocumentItem {
@@ -117,27 +118,6 @@ export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-// 效力状态徽标配色。**标签不在这里**——由服务端 `/api/legal/validity-statuses` 下发，
-// 这个枚举已经被读反过一次（`0` 是「未标注」、`-1` 才是「已失效」），多一份拷贝就多
-// 一次抄错的机会。这里只决定颜色。
-const VALIDITY_TONE: Record<number, string> = {
-  3: 'bg-green-100 text-green-700 border-green-200', // 现行有效
-  2: 'bg-yellow-100 text-yellow-700 border-yellow-200', // 已修改
-  4: 'bg-blue-100 text-blue-700 border-blue-200', // 尚未生效
-  0: 'bg-muted text-muted-foreground border-border', // 未标注
-  1: 'bg-red-100 text-red-700 border-red-200', // 已废止
-  [-1]: 'bg-red-50 text-red-600 border-red-200', // 已失效
-}
-
-/** 效力状态徽标文案；拿不到标签表时返回 null（宁可不显示，也不猜一个含义）。 */
-export function validityLabel(
-  value: number | null | undefined,
-  labels?: Record<number, string>
-): string | null {
-  if (value == null || !labels) return null
-  return labels[value] ?? `取值 ${value}`
 }
 
 // 截断文件名
@@ -332,9 +312,9 @@ function FileItem({ doc, isSelected, onSelect, onRetry, validityLabels }: FileIt
       {validity && (
         <Badge
           variant="outline"
-          className={`mt-0.5 text-[8px] px-1.5 py-0 leading-tight font-normal ${
-            VALIDITY_TONE[doc.validity_status as number] ?? 'bg-muted text-muted-foreground border-border'
-          }`}
+          className={`mt-0.5 text-[8px] px-1.5 py-0 leading-tight font-normal ${validityTone(
+            doc.validity_status
+          )}`}
         >
           {validity}
         </Badge>

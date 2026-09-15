@@ -8,7 +8,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-import FileItem, { validityLabel, type MergedFile } from './FileItem'
+import { validityLabel } from '@/lib/legalValidity'
+import FileItem, { type MergedFile } from './FileItem'
 
 const LABELS: Record<number, string> = {
   3: '现行有效',

@@ -18,12 +18,13 @@ import Retrieval from './Retrieval'
 
 vi.mock('@/lib/api', () => ({
   retrievalApi: { search: vi.fn() },
-  legalApi: { article: vi.fn() },
+  legalApi: { article: vi.fn(), validityStatuses: vi.fn() },
   knowledgeBaseApi: { list: vi.fn() },
 }))
 
 const mockedSearch = vi.mocked(retrievalApi.search)
 const mockedArticle = vi.mocked(legalApi.article)
+const mockedValidity = vi.mocked(legalApi.validityStatuses)
 const mockedList = vi.mocked(knowledgeBaseApi.list)
 
 // jsdom 缺 Radix Select 用到的两个指针 API。
@@ -51,6 +52,34 @@ function emptySearchResponse() {
   }
 }
 
+// 一条带完整法条元数据的结果：用来钉住"检索结果自己就带时间"。
+function searchResponseWithLegalMeta() {
+  return {
+    ...emptySearchResponse(),
+    total: 1,
+    results: [
+      {
+        chunk_id: 'c1',
+        doc_id: 'd1',
+        filename: '中华人民共和国民法典.docx',
+        content: '第一条 为了保护民事主体的合法权益，调整民事关系，根据宪法，制定本法。',
+        child_content: '第一条 为了保护民事主体的合法权益，调整民事关系，根据宪法，制定本法。',
+        score: 0.9,
+        rrf_score: null,
+        rerank_score: null,
+        routes: ['dense'],
+        metadata: {
+          law_name: '中华人民共和国民法典',
+          article_label: '第一条',
+          publish_date: '2020-05-28',
+          effective_date: '2021-01-01',
+          validity_status: 3,
+        },
+      },
+    ],
+  }
+}
+
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
@@ -67,6 +96,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockedList.mockResolvedValue({ items: [{ id: 'kb-1', name: '全局法条库' }], total: 1 } as never)
   mockedSearch.mockResolvedValue(emptySearchResponse() as never)
+  mockedValidity.mockResolvedValue([
+    { value: 3, label: '现行有效' },
+    { value: 2, label: '已修改' },
+    { value: 1, label: '已废止' },
+    { value: -1, label: '已失效' },
+    { value: 4, label: '尚未生效' },
+    { value: 0, label: '未标注' },
+  ] as never)
 })
 
 describe('检索测试页的能力切换', () => {
@@ -130,5 +167,23 @@ describe('检索测试页的能力切换', () => {
     expect(mockedSearch).not.toHaveBeenCalled()
     expect(await screen.findByText('第一百四十六条')).toBeInTheDocument()
     expect(screen.getByText(/行为人与相对人以虚假的意思表示/)).toBeInTheDocument()
+  })
+
+  it('检索结果自带法名、条号、公布/施行日期与效力状态', async () => {
+    // 同一部法的新旧版本、以及针对某条的补充文件，正文看起来都像"第一条"，光看
+    // 内容分不出谁新谁旧。这两条日期就是给调用方作参考的，必须落在结果卡片上。
+    mockedSearch.mockResolvedValue(searchResponseWithLegalMeta() as never)
+    const user = userEvent.setup()
+    render(createElement(Retrieval), { wrapper })
+
+    await selectKb(user)
+    await user.type(screen.getByPlaceholderText(/输入检索查询/), '民法典第一条')
+    await user.click(screen.getByRole('button', { name: '检索' }))
+
+    expect(await screen.findByText('中华人民共和国民法典')).toBeInTheDocument()
+    expect(screen.getByText('第一条')).toBeInTheDocument()
+    expect(screen.getByText(/公布 2020-05-28/)).toBeInTheDocument()
+    expect(screen.getByText(/施行 2021-01-01/)).toBeInTheDocument()
+    expect(screen.getByText('现行有效')).toBeInTheDocument()
   })
 })

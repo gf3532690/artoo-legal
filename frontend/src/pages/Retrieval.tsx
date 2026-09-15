@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Search,
@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import RetrievalResultsSkeleton from '@/components/skeletons/RetrievalResultsSkeleton'
+import { metaText, metaValidityStatus, validityLabel, validityTone } from '@/lib/legalValidity'
 
 // 法条库类型
 interface KnowledgeBaseItem {
@@ -108,6 +109,18 @@ function Retrieval() {
     queryFn: () =>
       knowledgeBaseApi.list({ page_size: 100 }).then((res) => res.items as KnowledgeBaseItem[]),
   })
+
+  // 效力状态词表（取值→中文标签）。标签由服务端下发，前端不写死这个枚举。
+  const { data: validityOptions } = useQuery({
+    queryKey: ['legal-validity-statuses'],
+    queryFn: () => legalApi.validityStatuses(),
+    staleTime: Infinity,
+  })
+  const validityLabels = useMemo(() => {
+    const map: Record<number, string> = {}
+    for (const option of validityOptions ?? []) map[option.value] = option.label
+    return Object.keys(map).length > 0 ? map : undefined
+  }, [validityOptions])
 
   // 按能力走各自的真实接口
   const searchMutation = useMutation({
@@ -345,6 +358,7 @@ function Retrieval() {
                 isExpanded={expandedItems.has(idx)}
                 onToggle={() => toggleExpand(idx)}
                 isHybrid={!!data?.trace}
+                validityLabels={validityLabels}
               />
             ))}
           </div>
@@ -441,15 +455,28 @@ function ResultCard({
   isExpanded,
   onToggle,
   isHybrid,
+  validityLabels,
 }: {
   result: RetrievalResultItem
   index: number
   isExpanded: boolean
   onToggle: () => void
   isHybrid: boolean
+  validityLabels?: Record<number, string>
 }) {
   const hasParent =
     !!result.content && !!result.child_content && result.content !== result.child_content
+
+  // 法条身份与时间。同名法、同条号在不同法/不同版本里都有，光看正文分不出来，
+  // 这里把法名、条号、公布/施行日期和效力状态一起摆出来。
+  const lawName = metaText(result.metadata, 'law_name')
+  const articleLabel = metaText(result.metadata, 'article_label')
+  const publishDate = metaText(result.metadata, 'publish_date')
+  const effectiveDate = metaText(result.metadata, 'effective_date')
+  const validityStatus = metaValidityStatus(result.metadata)
+  const validity = validityLabel(validityStatus, validityLabels)
+  const hasLegalIdentity =
+    !!lawName || !!articleLabel || !!publishDate || !!effectiveDate || !!validity
 
   // 最终分数配色（语义化：高/中/低）
   function scoreColor(score: number) {
@@ -513,6 +540,33 @@ function ResultCard({
             </Tooltip>
           </div>
         </div>
+
+        {/* 法条身份与时间 */}
+        {hasLegalIdentity && (
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mb-2.5 text-xs text-muted-foreground">
+            {lawName && <span className="font-medium text-foreground/80">{lawName}</span>}
+            {articleLabel && <span className="font-medium text-primary">{articleLabel}</span>}
+            {publishDate && (
+              <span title="公布日期：这个版本的公布日。判断哪一条更新，比它">
+                公布 {publishDate}
+              </span>
+            )}
+            {effectiveDate && (
+              <span title="施行日期：这个版本开始生效的日期。问「行为时法」用它">
+                施行 {effectiveDate}
+              </span>
+            )}
+            {validity && (
+              <span
+                className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${validityTone(
+                  validityStatus
+                )}`}
+              >
+                {validity}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 命中内容（子块） */}
         <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/80">
