@@ -42,9 +42,10 @@ The boundaries are deliberate:
   endpoint are "name the one you want" paths and keep returning repealed articles,
   with the status still in `metadata`. Filtering them would turn a deliberate lookup
   into a confusing `404`/fallback.
-- **Ingestion is unchanged.** The decided position is that repealed statutes stay in
-  the library (legal practice needs the law as it stood when an act was committed), so
-  the filter belongs at query time, not at ingest time.
+- **Ingestion is unchanged.** The instruction was explicit: ingestion is not affected,
+  the filter belongs at query time. Retaining the full set also keeps the ability to
+  ask what the law said when an act was committed, which is the reason not to look for
+  a way to "fix" this at ingest time later.
 - Filtering happens **after** recall because `validity_status` is not a Milvus scalar
   field. The API therefore oversamples candidates by ~4× (the repealed share is ~12%)
   so a page usually still fills; a caller can still get fewer than `top_k` when a
@@ -53,10 +54,10 @@ The boundaries are deliberate:
 
 ## Alternatives considered
 
-**Excluding the 2,617 documents at ingest time.** Rejected on the product decision:
-legal work needs the law as it stood at the time of an act, and the instruction was
-explicitly that ingestion stays as-is. It would also have saved ~12% capacity, so the
-option stays on the table if that need ever disappears.
+**Excluding the 2,617 documents at ingest time.** Rejected: the instruction was
+explicitly that ingestion stays as-is, and retaining the documents preserves the
+ability to answer what the law said when an act was committed. It would have saved
+~12% capacity, so the option stays on the table if that need ever disappears.
 
 **Leaving the filtering to callers.** Rejected: the default would remain wrong (a
 legal search that returns repealed text as current law), and every integrator would

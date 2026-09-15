@@ -116,7 +116,10 @@ python -m app.scripts.ingest_legal_corpus --list <报告目录>/ingest_list.csv 
 
 ## 8. 本次不在范围内
 
-- **版本选版尚未执行**：清单已按"入库前过滤"产出，PRD 的"仅返回现行有效"要等这一步；
-  `validity_status` 的 `1/2/4/-1` 语义仍需数据源确认。
+- **PRD「仅返回现行有效」按"默认排除 + 参数放开"实现**（2026-09-15）：`validity_status` 的
+  枚举定义已从数据源字典确认（见 [legal-first-ingest-checklist.md](legal-first-ingest-checklist.md)
+  第四节），检索侧默认排除 `1` 已废止与 `-1` 已失效，`include_invalid=true` 可查全部。
+  **入库口径不变**：已废止/已失效的法条照收（共约 12%），以便回答"行为时法"这类问题。
+  入库选版规则依赖的假设（`3` 即现行有效）也随之从假设转为事实。
 - **粒度 A/B 未做**：`article` 粒度是按容量与空库可回退性选的，检索质量对比待补（需评测集）。
 - 数据缺口三项（部门规章 / `expiry_date` / 关联司法解释）按约定暂缓。
