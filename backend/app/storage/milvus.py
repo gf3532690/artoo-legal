@@ -266,7 +266,10 @@ _SCALAR_INDEXES = {
 LEGAL_FILTER_FIELD_LENGTHS: dict[str, int] = {
     "law_type": 64,  # 最长取值「有关法律问题和重大问题的决定（部分）」约 58 字节
     "province": 32,  # 最长「新疆维吾尔自治区」24 字节
-    "city": 32,
+    # 城市要容纳自治州与县级名：实测最长「双江拉祜族佤族布朗族傣族自治县」45 字节，
+    # 「克孜勒苏柯尔克孜自治州」33 字节。原来的 32 只够装被截断的假名（见
+    # .agents/notes/implemented/bug-fix/2026-09-15-legal-region-boundary.md）。
+    "city": 64,
 }
 
 # ------------------------------------------------------------------

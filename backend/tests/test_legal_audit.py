@@ -124,7 +124,13 @@ class TestIterCorpus:
 
 
 class TestDocumentParagraphs:
-    """段落抽取已收敛到共享实现（loader 的兜底与核对脚本共用一份）。"""
+    """段落抽取已收敛到共享实现（loader 的兜底与核对脚本共用一份）。
+
+    fixture 必须用真实的 WordprocessingML 命名空间：抽取按命名空间 URI 识别 ``w:p`` /
+    ``w:t``（前缀可以任意），不再是按 ``<w:p>`` 字面量做字符串匹配。
+    """
+
+    _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
     def _docx_bytes(self, document_xml: str) -> bytes:
         buffer = io.BytesIO()
@@ -134,7 +140,7 @@ class TestDocumentParagraphs:
 
     def test_extracts_paragraph_text(self) -> None:
         data = self._docx_bytes(
-            '<?xml version="1.0"?><w:document xmlns:w="w"><w:body>'
+            f'<?xml version="1.0"?><w:document xmlns:w="{self._W_NS}"><w:body>'
             "<w:p><w:r><w:t>第一条　正文</w:t></w:r></w:p>"
             "<w:p/>"
             "<w:p><w:r><w:t>第二条</w:t></w:r><w:r><w:t>　正文</w:t></w:r></w:p>"
@@ -146,7 +152,7 @@ class TestDocumentParagraphs:
     def test_does_not_leak_xml_markup(self) -> None:
         """``<w:tbl>`` / ``<w:tab/>`` 等以 t 开头的标签不能被当成文本标签。"""
         data = self._docx_bytes(
-            '<?xml version="1.0"?><w:document xmlns:w="w"><w:body>'
+            f'<?xml version="1.0"?><w:document xmlns:w="{self._W_NS}"><w:body>'
             "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\"/></w:tabs>"
             "<w:autoSpaceDE/><w:bidi w:val=\"0\"/></w:pPr>"
             "<w:r><w:t>国务院关于修改某条例的决定</w:t></w:r></w:p>"
@@ -165,7 +171,7 @@ class TestDocumentParagraphs:
     def test_table_paragraphs_are_included_in_order(self) -> None:
         """``DocxLoader`` 现在会读表格内段落，fast 模式必须对齐（否则整篇法条漏统计）。"""
         data = self._docx_bytes(
-            '<?xml version="1.0"?><w:document xmlns:w="w"><w:body>'
+            f'<?xml version="1.0"?><w:document xmlns:w="{self._W_NS}"><w:body>'
             "<w:p><w:r><w:t>第一条　正文</w:t></w:r></w:p>"
             "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>表内文字</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
             "<w:p><w:r><w:t>第二条　正文</w:t></w:r></w:p>"

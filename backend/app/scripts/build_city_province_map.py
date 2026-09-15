@@ -25,8 +25,8 @@ import sys
 
 from app.pipeline.legal_region import (
     PROVINCES,
-    _CITY_AT_START,
     _province_at_start,
+    city_at_start,
     find_approving_province,
 )
 from app.pipeline.loaders.docx_xml_text import paragraphs_from_bytes
@@ -52,11 +52,17 @@ def collect(corpus: str, *, limit: int = 0) -> tuple[dict[str, collections.Count
             break
         path = os.path.join(corpus, name)
         processed += 1
-        # 市级：法名不以市名开头时（如「深圳经济特区…」）从标题猜不出来，跳过。
-        match = _CITY_AT_START.match(name.split("_")[0])
-        if not match or _province_at_start(name):
+        # 市级：法名不以城市/州名开头时（如「深圳经济特区…」）从标题猜不出来，跳过；
+        # 以省名开头的也不进表——那条路运行时只认这张表本身（见 resolve_region 的说明），
+        # 让表只由「整份法名就是城市名开头」的样本推导，来源单一、可核对。
+        if _province_at_start(name):
             continue
-        city = match.group(1) + "市"
+        # 只用 city_at_start，**不能**用运行时的 city_of_title——后者白名单优先，而这张表
+        # 正是它要产出的东西：拿旧表当输入会把上一版的脏名字原样带回来（实测一跑就退回
+        # 365 条、含「临夏回族市」）。建表只能靠规则本身，规则带边界判据、后缀原样保留。
+        city = city_at_start(name.split("_")[0])
+        if not city:
+            continue
         province = find_approving_province(_head_text(path))
         if province:
             pairs[city][province] += 1

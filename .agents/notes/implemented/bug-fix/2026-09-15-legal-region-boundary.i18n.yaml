@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/bug-fix/2026-09-15-legal-region-boundary.md .agents/notes/implemented/bug-fix/2026-09-15-legal-region-boundary.zh.md
+2026-09-15-legal-region-boundary.md: aa5cf3f7de30b0c8abed5deee4ffe42cd5e53592
+2026-09-15-legal-region-boundary.zh.md: f1219bc4d1fd3632aaca82b959eb82f59a3ba4c5

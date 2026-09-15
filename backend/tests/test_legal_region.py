@@ -10,7 +10,10 @@ import os as _os
 
 _os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production")
 
+import pytest
+
 from app.pipeline.legal_region import (
+    city_at_start,
     city_province_map,
     county_at_start,
     find_approving_province,
@@ -86,6 +89,66 @@ class TestResolveRegion:
         assert county_at_start("河北省人民代表大会常务委员会") is None
 
 
+class TestCityBoundary:
+    """城市名边界：既不能把后面的词吃进来，也不能把真城市名挡掉。
+
+    实测事故：``^([\\u4e00-\\u9fa5]{2,10}?)(?:市|自治州|地区|盟)`` 配 ``+ "市"`` 会把
+    「阜新蒙古族自治县县城市容…」抽成 33 字节的「阜新蒙古族自治县县城市」，写 Milvus 时
+    撑爆 varchar(32)；同时把「德宏傣族景颇族自治州」拼成「德宏傣族景颇族市」。
+    """
+
+    @pytest.mark.parametrize("text,expected", [
+        ("厦门市禁止燃放烟花爆竹规定", "厦门市"),
+        ("深圳市城市轨道交通条例", "深圳市"),
+        # 「…城市」：真名 stem 都是 2 字
+        ("景德镇市城市管理条例", "景德镇市"),
+        ("塔城市城市市容和环境卫生管理条例", "塔城市"),
+        ("宣城市城市绿化条例", "宣城市"),
+        ("晋城市大气污染防治条例", "晋城市"),
+        # 自治州 / 地区 / 盟要保留后缀，不再拼成「…市」
+        ("德宏傣族景颇族自治州傣医药条例", "德宏傣族景颇族自治州"),
+        ("克孜勒苏柯尔克孜自治州条例", "克孜勒苏柯尔克孜自治州"),
+        ("阿勒泰地区条例", "阿勒泰地区"),
+        ("锡林郭勒盟工作委员会工作条例", "锡林郭勒盟"),
+    ])
+    def test_keeps_the_real_city(self, text: str, expected: str) -> None:
+        assert city_at_start(text) == expected
+
+    @pytest.mark.parametrize("text", [
+        # 前缀把后面的词吃进来（曾经的「…县县城市」「…城镇市」）
+        "阜新蒙古族自治县县城市容和环境卫生管理条例",
+        "河南蒙古族自治县城镇市容市貌管护条例",
+        "门源回族自治县城镇市容和环境卫生管理条例",
+        "彭水苗族土家族自治县市容和环境卫生管理条例",
+        # 「城市」这个词被当前缀
+        "中华人民共和国城市维护建设税法",
+        "北京城市副中心条例",
+        "城市市容和环境卫生管理条例",
+        # 「市」属于普通词
+        "人力资源市场暂行条例",
+        "乐东黎族自治县旅游市场管理条例",
+        # 「地区」是普通名词，不是行政区（只认封闭清单）
+        "中国公民往来台湾地区管理办法",
+        "吉林省西部地区生态环境保护与建设若干规定",
+        "广东省促进民族地区发展条例",
+        # 省级前缀由 resolve_region 的省级分支处理，这里不猜
+        "山西省不设区的市和市辖区人民代表大会常务委员会街道工作委员会工作条例",
+        "广东省粤港澳大湾区内地九市轨道交通发展条例",
+        "北京市物业管理条例",
+    ])
+    def test_rejects_over_capture(self, text: str) -> None:
+        assert city_at_start(text) is None
+
+    def test_province_prefix_still_yields_city(self) -> None:
+        """省名之后直接跟州/市名时不能丢城市，否则「按城市筛选」永远查不到。"""
+        assert resolve_region("云南省德宏傣族景颇族自治州傣医药条例", None, None) == (
+            "云南省", "德宏傣族景颇族自治州"
+        )
+
+    def test_province_level_regulation_keeps_city_empty(self) -> None:
+        assert resolve_region("河北省土壤污染防治条例", None, None) == ("河北省", None)
+
+
 class TestCityProvinceMapData:
     """映射表是从语料推导并随仓库提交的数据，用它当回归护栏。"""
 
@@ -104,3 +167,22 @@ class TestCityProvinceMapData:
 
         assert mapping
         assert set(mapping.values()) <= set(PROVINCES)
+
+    def test_map_keeps_suffixes_and_has_no_over_capture(self) -> None:
+        """表里不能有被拼坏的假名，且后缀要保留（自治州不再变成「…族市」）。"""
+        mapping = city_province_map()
+
+        assert "景德镇市" in mapping
+        assert "大理白族自治州" in mapping
+        assert "德宏傣族景颇族自治州" in mapping
+        assert not [name for name in mapping if "族市" in name or "自治县" in name]
+
+    def test_map_names_fit_the_milvus_field(self) -> None:
+        """字段上限按语料里最长的真实地名定（自治州 33 字节 / 县级 45 字节），取 64。"""
+        from app.storage.milvus import LEGAL_FILTER_FIELD_LENGTHS
+
+        mapping = city_province_map()
+        longest = max(len(name.encode("utf-8")) for name in mapping)
+
+        assert longest > 32, "语料里真实地名已超过旧的 32 字节上限"
+        assert longest <= LEGAL_FILTER_FIELD_LENGTHS["city"]
