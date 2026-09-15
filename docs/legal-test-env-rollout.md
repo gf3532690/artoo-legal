@@ -104,7 +104,42 @@ python -m app.scripts.ingest_legal_corpus --list <报告目录>/ingest_list.csv 
 
 期望 `missing=0`、`failed=0`。容量核对：`used_chunks` 应落在 **约 0.82 M**（上限 1 M，留约 18%）。
 
-## 7. 失败处置速查
+## 7. 升级到带「效力状态」筛选的版本（不需要重建、不需要重灌）
+
+文件列表要按效力状态筛选，因此 `documents` 多了一列 `validity_status` 和它的索引。这两样
+**由进程启动时的幂等迁移自动补**（`app/startup._auto_migrate_legal_document_columns`），
+API 与 Worker 各自会跑一次，不需要手建、不需要重置 Milvus、也不需要重新解析文档。
+
+唯一需要手动做一次的是**存量回填**：迁移只补结构，不回填数据（回填要扫全表，不适合放在
+每次启动都要跑的路径上），而已经入库的文档，其效力状态只存在于 `chunks.metadata`。
+
+```bash
+# 1) 先体检：只打印影响面，不改任何数据
+docker exec arag-backend python -m scripts.backfill_document_validity --dry-run
+
+# 2) 回填（无 TTY 时必须带 --yes）
+docker exec -T arag-backend python -m scripts.backfill_document_validity --yes
+```
+
+脚本只动 `status='completed'` 且 `validity_status` 为空的文档，幂等，可重复执行；它不重跑
+抽取、不重算向量，因此**可以和正在跑的全量入库并存**——新入库的文档由管道自己写这一列。
+跑完再执行一次 `--dry-run` 应当报 `0`。
+
+核对（应当看到分布不再是清一色 null）：
+
+```bash
+docker exec arag-backend python -c "
+import asyncio
+from sqlalchemy import text
+from app.storage.database import async_session
+async def main():
+    async with async_session() as s:
+        rows = await s.execute(text('SELECT validity_status, count(*) FROM documents GROUP BY 1 ORDER BY 2 DESC'))
+        for vs, n in rows: print(vs, n)
+asyncio.run(main())"
+```
+
+## 8. 失败处置速查
 
 | 现象 | 原因 | 处置 |
 |---|---|---|
@@ -114,7 +149,7 @@ python -m app.scripts.ingest_legal_corpus --list <报告目录>/ingest_list.csv 
 | 文档长时间 `pending` | worker 未起或队列阻塞 | `docker logs <worker容器>`；确认 worker 在跑 |
 | 检索结果缺 `law_type` | 文档非法条语料，或早于本次 schema | 属正常（缺值整键缺失，不是 `null`） |
 
-## 8. 本次不在范围内
+## 9. 本次不在范围内
 
 - **PRD「仅返回现行有效」按"默认排除 + 参数放开"实现**（2026-09-15）：`validity_status` 的
   枚举定义已从数据源字典确认（见 [legal-first-ingest-checklist.md](legal-first-ingest-checklist.md)
