@@ -527,6 +527,26 @@ curl -X POST $BASE/api/documents/<doc_id>/retry \
   -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EU"
 ```
 
+### 4.5.1 手动维护效力状态（需写权限）
+
+`PATCH /api/documents/{doc_id}/validity-status`，请求体 `{"validity_status": 3}`。
+
+```bash
+curl -X PATCH $BASE/api/documents/<doc_id>/validity-status \
+  -H "Authorization: Bearer $KEY" -H "X-External-User-Id: $EU" \
+  -H "Content-Type: application/json" \
+  -d '{"validity_status": 1}'
+```
+
+用于改正抽取错的状态（源库没标、或标错）。取值只认字典里的六个（见 4.3 的表），别的值返回
+`400`；文档尚未解析完成（`status != completed`）也返回 `400`——没有子块时改不了检索口径。
+
+**它同时改两处**：文件列表与列表筛选读的 `documents.validity_status`，以及检索结果与召回
+默认过滤读的每个子块的 `metadata.validity_status`。只改前者，手动标成"已废止"的法条在检索里
+仍按原状态返回。
+
+注意：**重新解析（4.5）会按抽取结果覆盖手动值**，手动维护不是给文档钉一个永久属性。
+
 ### 4.6 删除文档（需写权限）
 
 `DELETE /api/documents/{doc_id}` → `204`

@@ -24,7 +24,10 @@ import {
   Network,
   Link2,
   X,
+  Tag,
 } from 'lucide-react'
+import { validityLabel, validityTone } from '@/lib/legalValidity'
+import { Badge } from '@/components/ui/badge'
 import { documentApi, knowledgeBaseApi, folderApi, systemApi, legalApi } from '@/lib/api'
 import type { PageResult, KBCapacity } from '@/lib/api'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
@@ -96,6 +99,44 @@ function validityTagClass(active: boolean): string {
   }`
 }
 
+/**
+ * 表格视图里的效力状态徽标。
+ *
+ * 网格视图的徽标渲染在 FileItem 里，两者共用同一份词表与配色（`@/lib/legalValidity`）；
+ * 取值未知或本身缺失时显示「-」——列表视图如果看不到状态，按状态筛选就没法核对了。
+ */
+function ValidityCell({
+  value,
+  labels,
+}: {
+  value?: number | null
+  labels?: Record<number, string>
+}) {
+  const label = validityLabel(value, labels)
+  if (!label) return <span className="text-muted-foreground">-</span>
+  return (
+    <Badge
+      variant="outline"
+      className={`text-[10px] px-1.5 py-0 leading-tight font-normal ${validityTone(value)}`}
+    >
+      {label}
+    </Badge>
+  )
+}
+
+/**
+ * 「更新状态」弹窗要的最小字段集。
+ *
+ * 刻意不收 DocumentItem：网格视图与表格视图拿到的行类型不同（表格合并了本地上传条目），
+ * 两者都能满足这个形状，就不用为了对齐类型把字段在两边各抄一遍。
+ */
+interface StatusTarget {
+  id: string
+  filename: string
+  law_name?: string | null
+  validity_status?: number | null
+}
+
 // 工具栏按钮：artifact 打开（收起为纯图标）时套 Tooltip 显示中文名；展开时按钮自带文字，
 // 直接渲染不套 Tooltip，避免多余包裹。label 同时用于纯图标态的无障碍提示。
 function ToolbarTip({
@@ -145,6 +186,9 @@ function Documents() {
   // 法条库「效力状态」筛选：多选取并集，空数组=不过滤。过滤在服务端做（走
   // documents.validity_status 上的索引），不是把整页数据拉下来在前端筛。
   const [validityFilter, setValidityFilter] = useState<number[]>([])
+  /** 正在手动维护效力状态的文件（null = 弹窗关闭）与草稿值 */
+  const [statusTarget, setStatusTarget] = useState<StatusTarget | null>(null)
+  const [statusDraft, setStatusDraft] = useState<number | null>(null)
 
   // 批量选择状态
   const [selectionMode, setSelectionMode] = useState(false)
@@ -460,6 +504,22 @@ function Documents() {
     },
   })
 
+  // 手动维护效力状态：服务端会同时改列表读的那一列与检索读的子块元数据，所以这里
+  // 只需重新拉列表——不要在前端就地改缓存，那样会和服务端的真实口径分叉。
+  const statusMutation = useMutation({
+    mutationFn: (payload: { id: string; value: number }) =>
+      documentApi.setValidityStatus(payload.id, payload.value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents', kbId, currentFolderId] })
+      toast('效力状态已更新')
+      setStatusTarget(null)
+      setStatusDraft(null)
+    },
+    onError: (err) => {
+      toast(`更新状态失败: ${err instanceof Error ? err.message : '未知错误'}`)
+    },
+  })
+
   // ============================================================
   // 事件处理
   // ============================================================
@@ -475,6 +535,17 @@ function Documents() {
     setValidityFilter((prev) =>
       prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
     )
+  }
+
+  /** 打开「更新状态」弹窗：草稿先落在当前值上，避免手滑一次点击就改掉抽取结果。 */
+  function openStatusEditor(doc: StatusTarget) {
+    setStatusTarget(doc)
+    setStatusDraft(doc.validity_status ?? null)
+  }
+
+  function closeStatusEditor() {
+    setStatusTarget(null)
+    setStatusDraft(null)
   }
 
   // 处理文件选择（限制并发上传数，避免后端过载）
@@ -1107,6 +1178,14 @@ function Documents() {
                     {canWrite && (
                       <>
                         <ContextMenuSeparator />
+                        {/* 手动维护效力状态：抽取的值可能错、也可能没有（未标注），人工改对。
+                            只有解析完成、且属于法条库的文档才有这个字段可以维护。 */}
+                        {isLegalKb && doc.status === 'completed' && (
+                          <ContextMenuItem onClick={() => openStatusEditor(doc)}>
+                            <Tag className="h-4 w-4 mr-2" />
+                            更新状态
+                          </ContextMenuItem>
+                        )}
                         {doc.status !== 'processing' && (
                           <ContextMenuItem
                             onClick={() => retryMutation.mutate(doc.id)}
@@ -1156,6 +1235,9 @@ function Documents() {
                   <th className="text-left font-medium px-4 py-2.5 text-muted-foreground">名称</th>
                   <th className="text-left font-medium px-4 py-2.5 text-muted-foreground hidden md:table-cell">大小</th>
                   <th className="text-left font-medium px-4 py-2.5 text-muted-foreground hidden lg:table-cell">状态</th>
+                  {isLegalKb && (
+                    <th className="text-left font-medium px-4 py-2.5 text-muted-foreground hidden lg:table-cell">效力状态</th>
+                  )}
                   <th className="text-left font-medium px-4 py-2.5 text-muted-foreground hidden lg:table-cell">切片</th>
                   <th className="text-right font-medium px-4 py-2.5 text-muted-foreground">操作</th>
                 </tr>
@@ -1241,6 +1323,11 @@ function Documents() {
                         {statusLabel(doc.status)}
                       </span>
                     </td>
+                    {isLegalKb && (
+                      <td className="px-4 py-2.5 hidden lg:table-cell">
+                        <ValidityCell value={doc.validity_status} labels={validityLabels} />
+                      </td>
+                    )}
                     <td className="px-4 py-2.5 text-muted-foreground hidden lg:table-cell">
                       {doc.status === 'completed' && doc.chunk_count > 0 ? `${doc.chunk_count} 片` : '—'}
                     </td>
@@ -1268,6 +1355,17 @@ function Documents() {
                             >
                               <Eye className="h-3 w-3" />
                             </Button>
+                            {canWrite && isLegalKb && doc.status === 'completed' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs gap-1 cursor-pointer"
+                                title="更新效力状态"
+                                onClick={(e) => { e.stopPropagation(); openStatusEditor(doc) }}
+                              >
+                                <Tag className="h-3 w-3" />
+                              </Button>
+                            )}
                             {canWrite && (
                               <Button
                                 variant="ghost"
@@ -1365,6 +1463,53 @@ function Documents() {
 
       {/* 切片查看器 */}
       <ChunkViewer documentId={viewingChunks} onClose={() => setViewingChunks(null)} />
+
+      {/* 手动维护效力状态：抽取的值可能错、也可能本来就没有（未标注），人工改对。
+          保存后重新拉列表——服务端会同时改掉列表读的那一列与检索读的子块元数据。 */}
+      <Dialog open={!!statusTarget} onOpenChange={(open) => { if (!open) closeStatusEditor() }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>更新效力状态</DialogTitle>
+            <DialogDescription className="truncate">
+              {statusTarget?.law_name || statusTarget?.filename}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap gap-1.5 py-1">
+            {(validityOptions ?? []).map((option) => (
+              <button
+                key={option.value}
+                className={validityTagClass(statusDraft === option.value)}
+                aria-pressed={statusDraft === option.value}
+                onClick={() => setStatusDraft(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            手动维护的值同时改掉文件列表与检索口径；重新识别该文件会按抽取结果覆盖它。
+          </p>
+
+          <DialogFooter>
+            <Button variant="outline" className="cursor-pointer" onClick={closeStatusEditor}>
+              取消
+            </Button>
+            <Button
+              className="cursor-pointer"
+              disabled={statusDraft === null || statusMutation.isPending}
+              onClick={() => {
+                if (statusTarget && statusDraft !== null) {
+                  statusMutation.mutate({ id: statusTarget.id, value: statusDraft })
+                }
+              }}
+            >
+              {statusMutation.isPending ? '保存中…' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 文件夹上传确认对话框 */}
       <Dialog open={folderUploadDialog} onOpenChange={(open) => { if (!open) { setFolderUploadDialog(false); setFolderValidation(null) } }}>

@@ -112,6 +112,11 @@ The ingest-side corpus still carries the older problem this exposes rather than 
 ingest list is a one-shot snapshot, so a law whose newest version was `4` (尚未生效) at snapshot
 time stays behind (12 such laws).
 
+The field is no longer write-once: a manual correction path now exists, recorded in
+[Manual maintenance of a document's validity status](2026-09-16-legal-manual-validity-status.md).
+That is what makes the 2,031 documents carrying 未标注 fixable by hand instead of permanently
+unfilterable.
+
 ## Testing
 
 `tests/test_legal_document_status_filter.py` (15 tests) pins the enum values including the two

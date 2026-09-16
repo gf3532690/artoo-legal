@@ -96,6 +96,10 @@ EXISTS (chunks c WHERE ... IN ('1','-1'))   Parallel Seq Scan on chunks
 这次改动**暴露**但没有解决入库侧的老问题：入库清单是一次性快照，因此快照时最新版本还是 `4`
 （尚未生效）的法，库里留下的仍是旧版（共 12 部这样的法）。
 
+这个字段不再是"写完就定"：现在有了手动纠正的路径，记录在
+[手动维护文档效力状态](2026-09-16-legal-manual-validity-status.zh.md)。也正因为有了它，那 2,031
+份「未标注」才可以靠人工修正，而不是永远筛不出来。
+
 ## Testing
 
 `tests/test_legal_document_status_filter.py`（15 项）钉住：枚举六个取值（含曾读反的那两个）、

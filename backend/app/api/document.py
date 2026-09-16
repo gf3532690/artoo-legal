@@ -1,6 +1,7 @@
 """文档上传与管理接口"""
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -9,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -20,6 +21,7 @@ from app.auth.identity import IdentityContext
 from app.auth.kb_authz import GrantView, KbAccessEnum, kb_authorization_decision
 from app.models.manager import get_model_manager
 from app.pipeline.pipeline import DocumentPipeline
+from app.pipeline.legal_metadata import VALIDITY_STATUS_LABELS
 from app.pipeline.queue import TaskMessage, TaskQueue
 from app.schema.api import PageResult
 from app.schema.db import (
@@ -825,6 +827,93 @@ async def get_document(
     doc = result.scalar_one_or_none()
     if doc is None:
         raise CrossTenantError()
+    return DocumentResponse(
+        id=doc.id,
+        kb_id=doc.kb_id,
+        filename=doc.filename,
+        file_type=doc.file_type,
+        file_size=doc.file_size,
+        status=doc.status,
+        error_message=doc.error_message,
+        chunk_count=doc.chunk_count,
+        progress=doc.progress or 0,
+        progress_message=doc.progress_message,
+        source_url=doc.source_url,
+        created_at=doc.created_at.isoformat() if doc.created_at else "",
+        validity_status=doc.validity_status,
+    )
+
+
+class ValidityStatusUpdate(BaseModel):
+    """手动维护文档效力状态的请求体。"""
+
+    validity_status: int = Field(
+        description="3 现行有效 / 2 已修改 / 1 已废止 / -1 已失效 / 4 尚未生效 / 0 未标注"
+    )
+
+
+@router.patch("/api/documents/{doc_id}/validity-status", response_model=DocumentResponse)
+async def update_document_validity_status(
+    doc_id: str,
+    body: ValidityStatusUpdate,
+    identity: IdentityContext = Depends(require_member()),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """手动改一份法条文档的效力状态（列表展示、列表筛选与检索口径一起改）。
+
+    为什么要写两处：文件列表与列表筛选读 ``documents.validity_status``，而检索读的是子块
+    ``chunks.metadata.validity_status``（``api/retrieval.py::_LEGAL_KEYS`` 水合的就是它）。
+    只改前者，手动标成"已废止"的文档在检索里仍按原状态返回——用户会直接当成 bug。
+
+    取值只认数据源字典里的六个：落一个字典外的整数进去，这条文档在界面上会显示成
+    「取值 N」，而没有任何筛选项能选中它。
+
+    **重新解析（retry）会按抽取结果覆盖这两处**，手动值不保留：手动维护是"把抽取错的
+    改对"，不是"给这条文档钉一个永久属性"。真要长期钉住，需要额外的 override 标记，
+    那是另一件事。
+    """
+    result = await db.execute(select(Document).where(Document.id == doc_id))
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise CrossTenantError()
+    # 与 retry 同一道写权限闸门：能改内容的人才能改状态
+    await _authorize_kb_access(db, identity, doc.kb_id, KbAccessEnum.WRITE)
+
+    value = body.validity_status
+    if value not in VALIDITY_STATUS_LABELS:
+        allowed = " / ".join(f"{v} {label}" for v, label in VALIDITY_STATUS_LABELS.items())
+        raise HTTPException(
+            status_code=400, detail=f"效力状态取值不在数据源字典里（可选：{allowed}）"
+        )
+    if doc.status != "completed":
+        # 未解析完的文档没有子块，只改列会造出一个检索侧看不见的状态
+        raise HTTPException(status_code=400, detail="文档尚未解析完成，无法维护效力状态")
+
+    doc.validity_status = value
+
+    # 子块元数据同步。父块的 metadata 为 NULL（只有子块带），所以按 IS NOT NULL 过滤即可；
+    # metadata 列是 json 而不是 jsonb，合并前要来回转一次。
+    await db.execute(
+        text(
+            "UPDATE chunks "
+            "SET metadata = (coalesce(metadata::jsonb, '{}'::jsonb) || CAST(:patch AS jsonb))::json "
+            "WHERE doc_id = :doc_id AND metadata IS NOT NULL"
+        ),
+        {"patch": json.dumps({"validity_status": value}), "doc_id": doc_id},
+    )
+    await db.commit()
+
+    # 检索结果缓存里存的是旧状态：不清掉，改完再查还会命中旧值，看起来像"没生效"。
+    from app.retrieval.cache import get_retrieval_cache
+    from app.storage.invalidation import get_invalidation_bus
+
+    cache = await get_retrieval_cache()
+    if cache:
+        await cache.invalidate_kb(doc.kb_id)
+    bus = get_invalidation_bus()
+    if bus:
+        await bus.publish("kb_data", doc.kb_id)
+
     return DocumentResponse(
         id=doc.id,
         kb_id=doc.kb_id,

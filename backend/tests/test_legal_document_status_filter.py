@@ -101,16 +101,22 @@ class _RecordingSession:
         self._docs = docs
         self._chunk_rows = list(chunk_rows)
         self.statements: list[str] = []
+        self.params: list[dict] = []
 
     async def scalar(self, statement):
         self.statements.append(_sql_of(statement))
         return len(self._docs)
 
-    async def execute(self, statement):
+    async def execute(self, statement, params=None):
         sql = _sql_of(statement)
         self.statements.append(sql)
+        if params is not None:
+            self.params.append(params)
         # 水合法名那条查的是 chunks，其余（取文档列表）查的是 documents
         return _FakeResult(self._chunk_rows if "FROM chunks" in sql else self._docs)
+
+    async def commit(self):
+        """手动维护状态那条路径会提交，这里没有真实事务可提交。"""
 
 
 def _doc(doc_id: str, validity_status: int | None):
@@ -188,6 +194,102 @@ class TestListDocumentsFilter:
 
         list_sql = next(sql for sql in session.statements if "FROM documents" in sql)
         assert "documents.validity_status IN (3)" in list_sql
+
+
+# ============================================================
+# 手动维护效力状态
+# ============================================================
+
+
+async def _call_status_update(monkeypatch, session, doc, value, *, seen: dict | None = None):
+    """调用 PATCH 端点，并把外部依赖（授权、检索缓存、失效广播）换成空实现。"""
+    from app.api import document as doc_api
+    from app.retrieval import cache as cache_mod
+    from app.storage import invalidation as invalidation_mod
+
+    async def _fake_authorize(db, identity, kb_id, access):
+        if seen is not None:
+            seen["access"] = access
+        return SimpleNamespace(id=kb_id, config={})
+
+    async def _no_cache():
+        return None
+
+    monkeypatch.setattr(doc_api, "_authorize_kb_access", _fake_authorize)
+    monkeypatch.setattr(cache_mod, "get_retrieval_cache", _no_cache)
+    monkeypatch.setattr(invalidation_mod, "get_invalidation_bus", lambda: None)
+
+    result = await doc_api.update_document_validity_status(
+        doc_id=doc.id,
+        body=doc_api.ValidityStatusUpdate(validity_status=value),
+        identity=SimpleNamespace(),
+        db=session,
+    )
+    return result
+
+
+class TestValidityStatusUpdate:
+    """手动维护：写两处、只认字典内的值、只给写权限的人。"""
+
+    @pytest.mark.asyncio
+    async def test_writes_both_the_column_and_the_chunk_metadata(self, monkeypatch) -> None:
+        """列表读 documents、检索读子块 —— 只写一处，手动改的值在检索里就不生效。"""
+        import json as _json
+
+        doc = _doc("d1", 1)
+        session = _RecordingSession([doc])
+        seen: dict = {}
+
+        await _call_status_update(monkeypatch, session, doc, 3, seen=seen)
+
+        assert doc.validity_status == 3
+        assert any("UPDATE chunks" in sql for sql in session.statements)
+        patches = [p for p in session.params if "patch" in p]
+        assert _json.loads(patches[-1]["patch"]) == {"validity_status": 3}
+        assert patches[-1]["doc_id"] == "d1"
+
+    @pytest.mark.asyncio
+    async def test_requires_write_access(self, monkeypatch) -> None:
+        """和改内容同一道闸门：只读访客不能改状态。"""
+        from app.auth.kb_authz import KbAccessEnum
+
+        doc = _doc("d1", 1)
+        session = _RecordingSession([doc])
+        seen: dict = {}
+
+        await _call_status_update(monkeypatch, session, doc, 2, seen=seen)
+
+        assert seen["access"] is KbAccessEnum.WRITE
+
+    @pytest.mark.asyncio
+    async def test_rejects_value_outside_the_dictionary(self, monkeypatch) -> None:
+        """字典外的整数会让这条文档显示成「取值 N」，而且没有任何筛选项能选中它。"""
+        from fastapi import HTTPException
+
+        doc = _doc("d1", 1)
+        session = _RecordingSession([doc])
+
+        with pytest.raises(HTTPException) as exc:
+            await _call_status_update(monkeypatch, session, doc, 99)
+
+        assert exc.value.status_code == 400
+        assert doc.validity_status == 1  # 原值未被改动
+        assert not any("UPDATE chunks" in sql for sql in session.statements)
+
+    @pytest.mark.asyncio
+    async def test_rejects_unfinished_document(self, monkeypatch) -> None:
+        """未解析完的文档没有子块，只改列会造出一个检索侧看不见的状态。"""
+        from fastapi import HTTPException
+
+        doc = _doc("d1", None)
+        doc.status = "pending"
+        session = _RecordingSession([doc])
+
+        with pytest.raises(HTTPException) as exc:
+            await _call_status_update(monkeypatch, session, doc, 3)
+
+        assert exc.value.status_code == 400
+        assert not any("UPDATE chunks" in sql for sql in session.statements)
 
 
 class TestContractIsExposed:

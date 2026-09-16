@@ -290,6 +290,17 @@ export const documentApi = {
     }),
   retry: (id: string) =>
     request<unknown>(`/documents/${id}/retry`, { method: 'POST' }),
+  /**
+   * 手动维护法条效力状态。
+   *
+   * 服务端会把值同时写进列表读的那一列与检索读的子块元数据——只改一处，改完在检索里
+   * 还是旧状态。取值只认数据源字典里的六个。
+   */
+  setValidityStatus: (id: string, validityStatus: number) =>
+    request<unknown>(`/documents/${id}/validity-status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ validity_status: validityStatus }),
+    }),
   chunks: (id: string, params?: { page?: number; page_size?: number }) =>
     request<PageResult<unknown>>(
       `/documents/${id}/chunks?page=${params?.page ?? 1}&page_size=${params?.page_size ?? 20}`
