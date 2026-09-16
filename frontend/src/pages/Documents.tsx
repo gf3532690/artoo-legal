@@ -744,8 +744,7 @@ function Documents() {
         {/* 操作按钮（只读库隐藏全部写操作入口）。
             artifact 预览打开时列表区被压窄，按钮收起为纯图标（套 Tooltip 显示中文名）以自适应。 */}
         <TooltipProvider delayDuration={200}>
-        {/* 窄屏时状态标签换行而不是把工具栏撑破 */}
-        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+        <div className="flex items-center gap-2 shrink-0">
           {/* 知识图谱入口：仅全局+KB 双开关均启用时出现（design.md 5.3.1）。
               读权限用户亦可查看图谱，故不受 canWrite 限制。 */}
           {showGraphEntry && (
@@ -893,41 +892,45 @@ function Documents() {
         </div>
       )}
 
-      {/* 面包屑导航 */}
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <FolderBreadcrumb items={breadcrumb} onNavigate={navigateToFolder} />
-        <div className="flex items-center gap-2 shrink-0">
-          {/* 法条库专有：效力状态标签常驻在工具栏，点一下切换「该状态是否展示」
-              （多选取并集，过滤在服务端做）。做成常驻标签而不是下拉，是因为这一页的
-              主要动作就是按状态看文件：状态得先看得见，切一次只要一下。
-              非法条库不显示——那里的文档这个字段一律为空，摆一排永远筛不出东西的标签
-              只会让人以为文件丢了。 */}
-          {isLegalKb && validityOptions && validityOptions.length > 0 && (
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              <button
-                className={validityTagClass(validityFilter.length === 0)}
-                onClick={(e) => { e.stopPropagation(); setValidityFilter([]) }}
-                title="显示全部效力状态"
-              >
-                全部
-              </button>
-              {validityOptions.map((option) => {
-                const active = validityFilter.includes(option.value)
-                return (
-                  <button
-                    key={option.value}
-                    className={validityTagClass(active)}
-                    aria-pressed={active}
-                    onClick={(e) => { e.stopPropagation(); toggleValidityFilter(option.value) }}
-                    title={active ? `不再只看「${option.label}」` : `只看「${option.label}」`}
-                  >
-                    {option.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        <div className="flex items-center border border-border rounded-lg p-0.5 shrink-0">
+      {/* 工具栏：左边是「在哪里 + 看哪些状态」，右边是视图切换。
+          根目录刻意不显示面包屑——它的「全部文件」和标签里的「全部」说的是同一件事，
+          并排摆着只会让人猜哪个才是筛选；进入文件夹之后它才出现，那时它是导航，不是标题。 */}
+      <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0">
+        {currentFolderId && (
+          <FolderBreadcrumb items={breadcrumb} onNavigate={navigateToFolder} />
+        )}
+        {/* 法条库专有：效力状态标签常驻在工具栏，点一下切换「该状态是否展示」
+            （多选取并集，过滤在服务端做）。做成常驻标签而不是下拉，是因为这一页的
+            主要动作就是按状态看文件：状态得先看得见，切一次只要一下。
+            非法条库不显示——那里的文档这个字段一律为空，摆一排永远筛不出东西的标签
+            只会让人以为文件丢了。 */}
+        {isLegalKb && validityOptions && validityOptions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              className={validityTagClass(validityFilter.length === 0)}
+              onClick={(e) => { e.stopPropagation(); setValidityFilter([]) }}
+              title="显示全部效力状态"
+            >
+              全部
+            </button>
+            {validityOptions.map((option) => {
+              const active = validityFilter.includes(option.value)
+              return (
+                <button
+                  key={option.value}
+                  className={validityTagClass(active)}
+                  aria-pressed={active}
+                  onClick={(e) => { e.stopPropagation(); toggleValidityFilter(option.value) }}
+                  title={active ? `不再只看「${option.label}」` : `只看「${option.label}」`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="ml-auto flex items-center border border-border rounded-lg p-0.5 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setViewMode('grid') }}
             className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
@@ -940,7 +943,6 @@ function Documents() {
           >
             <List className="h-4 w-4" />
           </button>
-        </div>
         </div>
       </div>
 

@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-15-legal-document-validity-status-filter.md .agents/notes/implemented/feature/2026-09-15-legal-document-validity-status-filter.zh.md
-2026-09-15-legal-document-validity-status-filter.md: dcb608f6d585ff604246cd98d812caa8e01c507a
-2026-09-15-legal-document-validity-status-filter.zh.md: 36bb9908d72c20ee749b3c9a7b7f01570068c0f0
+2026-09-15-legal-document-validity-status-filter.md: 5bde9c89a5968a61a239605718f84ac62b0427ad
+2026-09-15-legal-document-validity-status-filter.zh.md: ffa42fa33ae6cfd8605d2bd9cc1e76decd57ea2a

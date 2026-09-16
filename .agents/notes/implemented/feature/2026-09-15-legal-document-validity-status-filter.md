@@ -39,6 +39,10 @@ endpoint both returns it and filters on it.
   status is shown; with none selected everything is shown, and the leading 全部 tag is what
   expresses that state. Hiding both the options and the current selection behind one more click is
   the wrong shape on the one page whose whole job is looking at files by status.
+  The tags sit on the left, and the root breadcrumb is **not** rendered at the root: 「全部文件」
+  and the 全部 tag say the same thing, and two labels for one state only invite the reader to guess
+  which one filters. Inside a folder the breadcrumb comes back — there it is navigation, not a
+  title.
 
 ### Why a column instead of deriving at read time
 
