@@ -39,6 +39,17 @@ field:
   verbs stripped.
 - `publish_date`: `props.publish_date` → parenthesized clause.
 
+`core.xml` mirrors `title` / `subject` and a date summary, and those mirrors are consumed per
+field. Its `dc:creator` is **not**: that field holds the document's author — the Word/WPS account
+of whoever last saved the file — not the issuing authority. The mirror existed to cover third-party
+documents that carry only `core.xml`, but it never fires for this corpus (all 29,957 documents carry
+`custom.xml` and all 29,957 have `authority`; the count carrying `core.xml` alone is zero), so its
+only reachable effect was on user-uploaded files, where it wrote the author's account into
+`issuing_authority` — observed as `YF-INT6` on an uploaded 税法 docx whose `custom.xml` held nothing
+but WPS boilerplate (`ICV`, `KSOProductBuildVer`). Removing it leaves the body-derived authority
+standing: a real authority carrying a date prefix beats an account name, and "no authority" is
+honest where "the author's account" is not.
+
 The two sources are not redundant for `publish_date`: the body's first
 parenthesized date is the passage date of the statute text, whereas
 `props.publish_date` identifies the version the file actually contains. In a
@@ -107,9 +118,9 @@ archive entries), so no input is affected today.
 
 `tests/test_docx_meta.py` builds synthetic docx archives in `tmp_path` and pins
 the reader's boundaries: known fields from `custom.xml`, the `core.xml` mirror
-alone, `custom.xml` winning over `core.xml`, missing `docProps`, non-zip input, a
-missing file, non-`lpwstr` value types, empty value elements, non-ISO dates,
-unknown keys landing in `extra`, and one broken part leaving the other usable.
+alone, `custom.xml` winning over `core.xml`, `dc:creator` not becoming `issuing_authority`,
+missing `docProps`, non-zip input, a missing file, non-`lpwstr` value types, empty value elements,
+non-ISO dates, unknown keys landing in `extra`, and one broken part leaving the other usable.
 
 `tests/test_legal_metadata.py` adds `TestDocxPropsOverride` for the precedence
 rules: full override, partial props keeping the rule fallback, `props=None`

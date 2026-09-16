@@ -79,7 +79,7 @@ async def test_result_carries_prd_fields_and_derived_article_id(monkeypatch) -> 
         chunks=[_Row(id="ck-1", kb_id="kb-global", chunk_metadata=dict(_LEGAL_METADATA))],
     )
 
-    items, _ = await retrieval_api._build_result_items(
+    items = await retrieval_api._build_result_items(
             [_result()], global_kb_ids=["kb-global"]
         )
 
@@ -92,6 +92,8 @@ async def test_result_carries_prd_fields_and_derived_article_id(monkeypatch) -> 
     assert metadata["publish_date"] == "2020-05-28"
     assert metadata["effective_date"] == "2021-01-01"
     assert metadata["validity_status"] == 3
+    # 中文描述随原值一起下发：调用方不必自己维护一份枚举（它被读反过一次）
+    assert metadata["validity_status_label"] == "现行有效"
     assert metadata["article_id"] == "doc-1:146"
     assert metadata["source"] == "global"
 
@@ -111,7 +113,7 @@ async def test_region_fields_are_exposed_for_local_regulations(monkeypatch) -> N
         })],
     )
 
-    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-9", doc_id="doc-9")])
+    items = await retrieval_api._build_result_items([_result(chunk_id="ck-9", doc_id="doc-9")])
 
     assert items[0].metadata["province"] == "江西省"
     assert items[0].metadata["city"] == "景德镇市"
@@ -130,7 +132,7 @@ async def test_article_less_document_gets_no_article_id(monkeypatch) -> None:
         })],
     )
 
-    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-2", doc_id="doc-2")])
+    items = await retrieval_api._build_result_items([_result(chunk_id="ck-2", doc_id="doc-2")])
 
     assert "article_id" not in items[0].metadata
     assert items[0].metadata["law_type"] == "修正案"
@@ -145,7 +147,7 @@ async def test_empty_metadata_values_are_not_emitted(monkeypatch) -> None:
         chunks=[_Row(id="ck-3", kb_id="kb-1", chunk_metadata={"law_name": "某条例"})],
     )
 
-    items, _ = await retrieval_api._build_result_items([_result(chunk_id="ck-3", doc_id="doc-3")])
+    items = await retrieval_api._build_result_items([_result(chunk_id="ck-3", doc_id="doc-3")])
 
     metadata = items[0].metadata
     assert metadata == {"law_name": "某条例"}

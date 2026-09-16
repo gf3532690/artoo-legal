@@ -48,6 +48,9 @@ class LegalArticleDetail(BaseModel):
     publish_date: str | None = None
     effective_date: str | None = None
     validity_status: int | None = None
+    validity_status_label: str | None = Field(
+        default=None, description="效力状态的中文描述，如「现行有效」；字典外的取值不给"
+    )
     source: str | None = Field(default=None, description="global / personal；无法判定时不返回")
 
 
@@ -127,6 +130,7 @@ async def get_legal_article(
         publish_date=meta.get("publish_date"),
         effective_date=meta.get("effective_date"),
         validity_status=meta.get("validity_status"),
+        validity_status_label=VALIDITY_STATUS_LABELS.get(meta.get("validity_status")),
         source=("global" if row["kb_id"] in set(global_kb_ids) else "personal")
         if global_kb_ids else None,
     )

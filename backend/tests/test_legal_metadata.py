@@ -304,7 +304,12 @@ class TestVersionAndProvenanceFields:
         assert all(e["confidence"] == 1.0 for e in with_article)
 
     def test_extractor_emits_null_keys_without_props(self) -> None:
-        """没有属性时键仍在，只是值为 None——字段字典是稳定形状。"""
+        """没有属性时键仍在——字段字典是稳定形状。
+
+        唯一一个例外是 ``validity_status``：它**有落库默认值**，源文件没标就是 ``0`` 未标注
+        （字典里 ``0`` 的语义本来就是"源库没给这份文件标状态"，留空则会让这份文档在列表里
+        没有徽标、按「未标注」也筛不出来）。其余字段留空不猜值。
+        """
         analysis = analyze_legal_document(MINFADIAN_WITH_TOC)
         chunker_result = LawsChunker().chunk(analysis.text)
 
@@ -318,7 +323,7 @@ class TestVersionAndProvenanceFields:
 
         assert meta
         for entry in meta:
-            assert entry["validity_status"] is None
+            assert entry["validity_status"] == 0
             assert entry["law_type"] is None
             assert entry["external_id"] is None
             assert entry["source_code"] is None

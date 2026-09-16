@@ -33,6 +33,15 @@ Status: implemented
 - `issuing_authority`：`props.authority` → 括注剥动词。
 - `publish_date`：`props.publish_date` → 括注。
 
+`core.xml` 镜像了 `title` / `subject` 与日期摘要，这几个镜像逐字段被采信；但它的
+`dc:creator` **不采信**——那个字段装的是文档作者（最后保存这份文件的 Word/WPS 账号），不是发布
+机关。这条镜像当初是为了兜住"只有 core.xml"的第三方文档，可它在本语料里从未生效过（29,957 份
+全部带 `custom.xml`、且全部有 `authority`，只有 core.xml 的为 0 份），所以唯一能碰到它的只有
+用户上传的文件——在那里它把作者账号写进了 `issuing_authority`：实测一份上传的税法 docx 里是
+`YF-INT6`，而它的 `custom.xml` 里只有 WPS 的样板字段（`ICV`、`KSOProductBuildVer`）。删掉之后
+由正文解析出的批准机关顶上：带日期前缀的真机关，也比一个账号名强，而"没有机关"比"作者账号"
+诚实。
+
 `publish_date` 上两个来源并不是冗余关系：正文括注的第一个日期是**法条文本的通过
 日期**，而 `props.publish_date` 标识的是**该文件实际承载的版本**。300 份抽样里有
 196 份正因此不同（例如山东省道路运输条例：正文 `2010-11-25`，属性 `2022-03-30`）。
@@ -88,8 +97,9 @@ Status: implemented
 
 `tests/test_docx_meta.py` 在 `tmp_path` 里现造合成 docx，钉住读取层的边界：
 从 `custom.xml` 读已知字段、只有 `core.xml` 镜像时兜底、`custom.xml` 覆盖
-`core.xml`、缺 `docProps`、非 zip 输入、文件不存在、非 `lpwstr` 值类型、空值元素、
-非 ISO 日期、未知键落进 `extra`、以及单部件损坏不影响另一部件。
+`core.xml`、`dc:creator` **不**变成 `issuing_authority`、缺 `docProps`、非 zip 输入、
+文件不存在、非 `lpwstr` 值类型、空值元素、非 ISO 日期、未知键落进 `extra`、以及单部件
+损坏不影响另一部件。
 
 `tests/test_legal_metadata.py` 新增 `TestDocxPropsOverride` 覆盖优先级规则：全字段
 覆盖、部分属性走规则兜底、`props=None` 时规则结果不变、条文结构判定仍由正文决定、

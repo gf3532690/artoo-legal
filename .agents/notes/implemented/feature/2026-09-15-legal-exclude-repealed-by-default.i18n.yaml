@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-15-legal-exclude-repealed-by-default.md .agents/notes/implemented/feature/2026-09-15-legal-exclude-repealed-by-default.zh.md
-2026-09-15-legal-exclude-repealed-by-default.md: 671e330e3ee1543bb4ab54c77a2928265726e464
-2026-09-15-legal-exclude-repealed-by-default.zh.md: 74cfb0fecefb3905e6e79f75d1860ff28ce62708
+2026-09-15-legal-exclude-repealed-by-default.md: bafabf5d7e7dccf7ba69b849738cdd71da80fe3b
+2026-09-15-legal-exclude-repealed-by-default.zh.md: 817ef0cad35d161ae15c2dfab33599cb1f494540

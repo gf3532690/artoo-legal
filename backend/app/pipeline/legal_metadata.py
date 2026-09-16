@@ -66,6 +66,14 @@ VALIDITY_STATUS_LABELS: dict[int, str] = {
     0: "未标注",
 }
 
+# 源文件没给状态时落库的取值：字典里的 ``0`` 未标注。
+#
+# 为什么不留空：字典里 ``0`` 的语义就是"源库没给这份文件标状态"，"读不到"与它本来就是同一件
+# 事。留空会让这份文档在列表里没有任何徽标、按"未标注"筛选也筛不出来——而它恰恰就是未标注。
+# 真正"没有这个概念"的地方只有两处：尚未解析完成的文档，以及非法条文档（本部署不存在——
+# 创建知识库时统一兜底 ``chunker_type=laws``，见 knowledge_base.py）。它们的列仍然是 NULL。
+VALIDITY_STATUS_UNKNOWN = 0
+
 
 def document_validity_status(legal_metadata: list[dict] | None) -> int | None:
     """从 per-chunk 法条元数据里取**文档级**效力状态。
@@ -87,6 +95,20 @@ def document_validity_status(legal_metadata: list[dict] | None) -> int | None:
     return None
 
 
+def resolve_document_validity_status(legal_metadata: list[dict] | None) -> int:
+    """文档级效力状态的**落库口径**：源文件没给就是 ``0`` 未标注。
+
+    为什么还要一层：:func:`document_validity_status` 回答的是"元数据里写了什么"（没写就是
+    ``None``），而"这份法条该被标成什么"是本部署的口径——本部署所有知识库都是法条库，于是
+    "源文件没标"就等于字典里的"未标注"，不存在"什么都没有"这一态。
+
+    与之相对，``documents.validity_status`` 仍然允许 NULL，但它只表示"还不是一份解析完成的
+    法条文档"（未解析完成 / 非法条文档），**不**表示未标注——两个概念不能混。
+    """
+    value = document_validity_status(legal_metadata)
+    return VALIDITY_STATUS_UNKNOWN if value is None else value
+
+
 @dataclass
 class LegalDocumentHeader:
     """文档级头信息。字段可空——解析不出就留空，不猜。"""
@@ -102,7 +124,9 @@ class LegalDocumentHeader:
     meta_source: str = "rule"
     # ── 版本与溯源字段：只来自 docx 内嵌属性，正文里没有对应信息。──
     effective_date: str | None = None  # ISO: YYYY-MM-DD
-    validity_status: int | None = None  # 原样保留；含义见 VALIDITY_STATUS_LABELS
+    # 头信息里原样保留（None = 这份文件确实没给）；发出去的字段字典里会落成
+    # VALIDITY_STATUS_UNKNOWN（0 未标注），见 extract()。取值含义见 VALIDITY_STATUS_LABELS。
+    validity_status: int | None = None
     law_type: str | None = None
     external_id: str | None = None
     source_code: str | None = None
@@ -435,7 +459,14 @@ class LegalMetadataExtractor:
                     # 版本与溯源字段：来自 docx 内嵌属性，正文里没有对应信息，
                     # 因此没有兜底路径，属性缺失时就是 None。
                     "effective_date": header.effective_date,
-                    "validity_status": header.validity_status,
+                    # 落库口径与文档列一致：源文件没标状态就是 0 未标注，不留空——留空会让
+                    # 检索侧水合不到这个键（`_LEGAL_KEYS` 只带走非 None 的值），于是"列表说
+                    # 未标注、检索里这个键不存在"，同一份文档两套说法。
+                    "validity_status": (
+                        header.validity_status
+                        if header.validity_status is not None
+                        else VALIDITY_STATUS_UNKNOWN
+                    ),
                     "law_type": header.law_type,
                     "external_id": header.external_id,
                     "source_code": header.source_code,

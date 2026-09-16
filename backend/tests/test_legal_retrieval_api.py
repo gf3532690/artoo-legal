@@ -16,14 +16,14 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.retrieval import (
-    INVALID_VALIDITY_STATUSES,
     MATCH_MODE_EXACT,
     MATCH_MODE_SEMANTIC,
+    RetrievalTestResponse,
     _MAX_PAGINATION_WINDOW,
     RetrievalTestRequest,
-    _is_invalid_legal,
     _run_retrieval,
     _slice_page_items,
+    _validity_status_label,
     parse_article_query,
 )
 from app.retrieval.article_lookup import split_article_id
@@ -101,36 +101,34 @@ class TestMatchModeValidation:
         assert MATCH_MODE_EXACT == "exact"
 
 
-class TestEffectivenessFilter:
-    """默认口径排除已废止/已失效。
+class TestStatusIsReportedNotFiltered:
+    """检索**不按效力状态过滤**，而是把状态（原值 + 中文描述）随结果一起下发。
 
-    官方枚举（数据源字典，2026-09-15 确认）：3 现行有效 / 2 已修改 / 1 已废止 /
-    -1 已失效 / 4 尚未生效 / 0 未标注。默认只排除「明确不具法律效力」的两个，
-    因为库内这类约占 12%，不该静默混进检索结果。
+    早先的默认口径是排除已废止/已失效（约占库内 12%）；改成"返回全部 + 带上状态"之后，
+    怎么用状态由调用方决定——而过滤放在调用方手里的前提，是它先拿得到状态。
     """
 
-    def test_only_repealed_and_lapsed_are_excluded(self) -> None:
-        assert INVALID_VALIDITY_STATUSES == frozenset({1, -1})
+    def test_request_has_no_filter_switch(self) -> None:
+        assert "include_invalid" not in RetrievalTestRequest.model_fields
 
-    @pytest.mark.parametrize("status,excluded", [
-        (3, False),   # 现行有效
-        (0, False),   # 未标注（主要是决定类文件，本身是有效文件）
-        (2, False),   # 已修改（是库里能拿到的最新版本）
-        (4, False),   # 尚未生效（还没生效的新法，不该被静默吞掉）
-        (1, True),    # 已废止
-        (-1, True),   # 已失效
+    def test_response_has_no_filtered_count(self) -> None:
+        assert "filtered_invalid_count" not in RetrievalTestResponse.model_fields
+
+    @pytest.mark.parametrize("status,label", [
+        (3, "现行有效"),
+        (2, "已修改"),
+        (1, "已废止"),
+        (-1, "已失效"),
+        (4, "尚未生效"),
+        (0, "未标注"),
     ])
-    def test_status_predicate(self, status: int, excluded: bool) -> None:
-        assert _is_invalid_legal({"validity_status": status}) is excluded
+    def test_label_covers_the_dictionary(self, status: int, label: str) -> None:
+        assert _validity_status_label(status) == label
 
-    def test_missing_status_is_treated_as_valid(self) -> None:
-        """元数据缺失不等于失效——宁可多给一条，也不要凭空少一条。"""
-        assert _is_invalid_legal({}) is False
-        assert _is_invalid_legal({"validity_status": None}) is False
-
-    def test_default_is_to_filter(self) -> None:
-        assert RetrievalTestRequest(query="x").include_invalid is False
-        assert RetrievalTestRequest(query="x", include_invalid=True).include_invalid is True
+    def test_unknown_and_missing_values_get_no_label(self) -> None:
+        """字典外的取值只发原值、不编描述；缺值同样不发——编一个标签比缺一个更糟。"""
+        assert _validity_status_label(99) is None
+        assert _validity_status_label(None) is None
 
 
 class TestArticleId:
@@ -158,12 +156,13 @@ class TestRoutesAreRegistered:
         request_props = schema["components"]["schemas"]["RetrievalTestRequest"]["properties"]
         assert request_props["page"]["default"] == 1
         assert request_props["match_mode"]["default"] == MATCH_MODE_SEMANTIC
-        assert request_props["include_invalid"]["default"] is False
+        # 效力状态过滤已取消：请求里没有开关，响应里也没有"被过滤掉几条"
+        assert "include_invalid" not in request_props
 
         response_props = schema["components"]["schemas"]["RetrievalTestResponse"]["properties"]
-        for field in ("page", "page_size", "has_more", "match_mode", "fallback_reason",
-                      "filtered_invalid_count"):
+        for field in ("page", "page_size", "has_more", "match_mode", "fallback_reason"):
             assert field in response_props
+        assert "filtered_invalid_count" not in response_props
 
         detail_props = schema["components"]["schemas"]["LegalArticleDetail"]["properties"]
         for field in ("article_id", "content", "matched_content", "law_name", "article_label"):

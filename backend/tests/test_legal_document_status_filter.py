@@ -17,11 +17,12 @@ _os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production")
 
 import pytest
 
-from app.api.retrieval import INVALID_VALIDITY_STATUSES
 from app.pipeline.legal_metadata import (
     VALIDITY_STATUS_LABELS,
     document_validity_status,
+    resolve_document_validity_status,
 )
+from app.pipeline.legal_metadata import VALIDITY_STATUS_UNKNOWN
 
 
 class TestValidityEnum:
@@ -39,12 +40,6 @@ class TestValidityEnum:
         """`0` 是未标注、`-1` 才是已失效。这两个曾经被读反，钉住免得再反一次。"""
         assert VALIDITY_STATUS_LABELS[0] == "未标注"
         assert VALIDITY_STATUS_LABELS[-1] == "已失效"
-
-    def test_retrieval_only_excludes_documented_values(self) -> None:
-        """检索默认排除的那两个值必须在枚举表里——否则排除的是个"不存在的状态"。"""
-        assert INVALID_VALIDITY_STATUSES == frozenset({1, -1})
-        assert INVALID_VALIDITY_STATUSES <= set(VALIDITY_STATUS_LABELS)
-
 
 class TestDocumentValidityStatus:
     """把 per-chunk 元数据收敛成**文档级**取值。"""
@@ -69,6 +64,67 @@ class TestDocumentValidityStatus:
 
     def test_non_dict_entries_are_tolerated(self) -> None:
         assert document_validity_status([None, "x", {"validity_status": -1}]) == -1
+
+
+class TestMissingStatusBecomesUnknown:
+    """源文件没标状态 → 落 0 未标注（本部署所有知识库都是法条库）。
+
+    留空是错的：字典里 ``0`` 的语义就是"源库没给这份文件标状态"，留空会让这份文档在列表里
+    没有任何徽标、按「未标注」筛选也筛不出来——而它恰恰就是未标注。
+    """
+
+    def test_resolver_defaults_missing_to_unknown(self) -> None:
+        assert resolve_document_validity_status([]) == VALIDITY_STATUS_UNKNOWN
+        assert resolve_document_validity_status(None) == VALIDITY_STATUS_UNKNOWN
+        assert (
+            resolve_document_validity_status([{}, {"validity_status": None}])
+            == VALIDITY_STATUS_UNKNOWN
+        )
+
+    def test_resolver_keeps_a_real_value_including_zero(self) -> None:
+        assert resolve_document_validity_status([{"validity_status": 1}]) == 1
+        assert resolve_document_validity_status([{"validity_status": 0}]) == 0
+        assert resolve_document_validity_status([{"validity_status": -1}]) == -1
+
+    def test_extractor_writes_unknown_instead_of_null(self) -> None:
+        """字段字典是**落库**的东西：这里留空，检索侧就水合不到这个键，
+        于是"列表说未标注、检索里没有这个键"，同一份文档两套说法。"""
+        from app.pipeline.legal_metadata import (
+            LegalDocumentAnalysis,
+            LegalDocumentHeader,
+            LegalMetadataExtractor,
+        )
+
+        results = LegalMetadataExtractor().extract(
+            child_chunks=["第一条 内容"],
+            parent_chunks=["第一条 内容"],
+            parent_child_map={0: [0]},
+            analysis=LegalDocumentAnalysis(
+                text="第一条 内容",
+                header=LegalDocumentHeader(law_name="测试法", validity_status=None),
+            ),
+        )
+
+        assert results[0]["validity_status"] == VALIDITY_STATUS_UNKNOWN
+
+    def test_extractor_keeps_a_real_value(self) -> None:
+        from app.pipeline.legal_metadata import (
+            LegalDocumentAnalysis,
+            LegalDocumentHeader,
+            LegalMetadataExtractor,
+        )
+
+        results = LegalMetadataExtractor().extract(
+            child_chunks=["第一条 内容"],
+            parent_chunks=["第一条 内容"],
+            parent_child_map={0: [0]},
+            analysis=LegalDocumentAnalysis(
+                text="第一条 内容",
+                header=LegalDocumentHeader(law_name="测试法", validity_status=1),
+            ),
+        )
+
+        assert results[0]["validity_status"] == 1
 
 
 # ============================================================

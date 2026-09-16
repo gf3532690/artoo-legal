@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/bug-fix/2026-09-16-legal-missing-validity-status-is-unlabelled.md .agents/notes/implemented/bug-fix/2026-09-16-legal-missing-validity-status-is-unlabelled.zh.md
+2026-09-16-legal-missing-validity-status-is-unlabelled.md: 1e22974bad5ee6d16865bcc5a4165abdef486b1f
+2026-09-16-legal-missing-validity-status-is-unlabelled.zh.md: e6750c7144c33a7e9352f138e3c4dc183e3f7344

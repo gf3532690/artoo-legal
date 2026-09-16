@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-14-docx-embedded-legal-metadata.md .agents/notes/implemented/feature/2026-09-14-docx-embedded-legal-metadata.zh.md
-2026-09-14-docx-embedded-legal-metadata.md: b91ebb2ba1168c6d0f7b4555e83f263cb400e7c2
-2026-09-14-docx-embedded-legal-metadata.zh.md: 13635fca8da433f26b48fec6c9b3cf553a800620
+2026-09-14-docx-embedded-legal-metadata.md: 45f5bd867d5aff55fc19849020b8a1f3590bab33
+2026-09-14-docx-embedded-legal-metadata.zh.md: b71332bb540c8947f32a62d9366e456249b8ced5

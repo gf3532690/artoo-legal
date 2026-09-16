@@ -191,12 +191,20 @@ def _read_core(archive: zipfile.ZipFile) -> dict[str, str]:
 
 
 def _mirror_from_core(core: dict[str, str]) -> dict[str, str]:
-    """把 ``core.xml`` 的镜像字段映射成业务键名。"""
+    """把 ``core.xml`` 的镜像字段映射成业务键名。
+
+    **不映射 ``creator``**：那曾经被当成发布机关，理由是"兜住只有 core.xml 的第三方文档"。
+    但这条兜底在真实语料里一次都没生效过——29,957 份文档全部带 ``custom.xml``，且全部有
+    ``authority``（实测只有 core.xml 的文档为 0 份），所以它只在**用户上传的第三方文件**上
+    生效，而生效时把 ``dc:creator``（Word/WPS 的用户名或账号，例如 ``YF-INT6``）写成了发布
+    机关。宁可留空：正文解析出来的批准机关比作者账号可靠，而"没有发布机关"是诚实的。
+
+    ``title`` / ``subject`` / description 里的日期摘要保留：它们来自 ``<dc:title>`` /
+    ``<dc:subject>`` / 约定的 ``<dc:description>``，语义与业务字段对得上，不是猜人。
+    """
     mirrored: dict[str, str] = {}
     if core.get("title"):
         mirrored["title"] = core["title"]
-    if core.get("creator"):
-        mirrored["authority"] = core["creator"]
     if core.get("subject"):
         mirrored["law_type"] = core["subject"]
     for key, value in _DESCRIPTION_FIELD.findall(core.get("description", "")):

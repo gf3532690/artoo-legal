@@ -97,7 +97,10 @@ class TestExtractDocxProps:
         assert props.origin == "custom+core"
 
     def test_core_mirror_is_used_when_custom_is_absent(self, tmp_path: Path) -> None:
-        """第三方 Word 文档可能只有 core.xml，镜像字段要能兜底。"""
+        """第三方 Word 文档可能只有 core.xml，语义对得上的镜像字段要能兜底。
+
+        ``creator`` 不在其列——见 :meth:`test_creator_is_not_treated_as_authority`。
+        """
         path = _write_docx(
             tmp_path / "b.docx",
             core=_core(
@@ -112,7 +115,7 @@ class TestExtractDocxProps:
 
         assert props is not None
         assert props.title == "中华人民共和国民法典"
-        assert props.authority == "全国人民代表大会常务委员会"
+        assert props.authority is None
         assert props.law_type == "法律"
         assert props.publish_date == "2020-05-28"
         assert props.effective_date == "2021-01-01"
@@ -214,5 +217,25 @@ class TestExtractDocxProps:
 
         assert props is not None
         assert props.title == "某条例"
-        assert props.authority == "某机关"
+        assert props.authority is None
         assert props.origin == "core"
+
+    def test_creator_is_not_treated_as_authority(self, tmp_path: Path) -> None:
+        """``dc:creator`` 是文档作者（Word/WPS 的用户名或账号），不是发布机关。
+
+        曾经把它映射成 ``authority`` 以"兜住只有 core.xml 的第三方文档"，但该兜底在真实语料里
+        一次都没生效过（29,957 份全部带 ``custom.xml`` 且全部有 ``authority``，只有 core.xml 的
+        为 0 份），只在用户上传的第三方文件上生效，而生效时把作者账号写成了发布机关。
+        """
+        path = _write_docx(
+            tmp_path / "j.docx",
+            core=_core(creator="YF-INT6"),
+            custom=_custom(ICV="1E4A…", KSOProductBuildVer="2052-12.1.0.18608"),
+        )
+
+        props = extract_docx_props(str(path))
+
+        assert props is not None
+        assert props.authority is None
+        # 别的字段不受影响：没有就是没有，不猜。
+        assert props.title is None

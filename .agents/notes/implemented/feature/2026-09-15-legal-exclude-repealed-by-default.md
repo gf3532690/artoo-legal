@@ -2,6 +2,11 @@
 
 Status: implemented
 
+> **Superseded on 2026-09-16**: retrieval no longer filters on `validity_status` at all. It returns
+> every value and sends the status — raw plus Chinese label — with each result, so the caller decides.
+> See [Retrieval reports validity status instead of filtering on it](2026-09-16-legal-retrieval-reports-status-instead-of-filtering.md).
+> The reasoning below is kept as the record of why the default exclusion existed and what it cost.
+
 ## Problem
 
 Two problems met here. The library knowingly contains documents whose

@@ -12,6 +12,10 @@
 它**不重跑抽取、不重算向量**，只是把已经躺在 chunks 里的值搬到 documents 上，因此对
 正在跑的全量入库没有破坏性（新入库的文档由管道自己写这一列）。
 
+第二步（同一趟里跟着跑）处理另一种情况：**解析完成但源文件没给状态**。按落库口径
+那是字典里的 ``0`` 未标注，不是留空——留空会让这份文档在列表里没有任何徽标、按「未标注」
+筛选也筛不出来，而它恰恰就是未标注。管道已经按这个口径写新文档，这里补的是历史数据。
+
 用法::
 
     # 1) 先体检：打印将影响的文档数，不做任何修改
@@ -34,11 +38,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 
 from sqlalchemy import text
 
 from app.pipeline.legal_metadata import VALIDITY_STATUS_LABELS
+from app.pipeline.legal_metadata import VALIDITY_STATUS_UNKNOWN
 from app.storage.database import async_session
 
 # 只认纯整数。元数据理论上只有整数，但真出现 'null' / 空串这类值时 ``::int`` 会让整条
@@ -122,19 +128,67 @@ async def _backfill(session, kb_id: str | None) -> int:
     return int(result.rowcount or 0)
 
 
+async def _unknown_count(session, kb_id: str | None) -> int:
+    """已完成、该列仍为空、且子块里也确实没有值的文档数（第二步的目标）。"""
+    sql = (
+        "SELECT count(*) FROM documents d "
+        "WHERE d.status = 'completed' AND d.validity_status IS NULL"
+        " AND NOT EXISTS ("
+        "   SELECT 1 FROM chunks c WHERE c.doc_id = d.id"
+        "    AND c.metadata ->> 'validity_status' ~ '^-?[0-9]+$'"
+        " )"
+        + _kb_clause(kb_id)
+    )
+    return int(await session.scalar(text(sql), _params(kb_id)) or 0)
+
+
+async def _backfill_unknown(session, kb_id: str | None) -> int:
+    """把「已完成但源文件没给状态」的文档落成 0 未标注（列 + 子块元数据一起）。
+
+    两处都要写：列表读列、检索读子块元数据。只改一处，同一份文档就会"列表说未标注、
+    检索里这个键不存在"。
+    """
+    column_sql = (
+        "UPDATE documents d SET validity_status = :unknown "
+        "WHERE d.status = 'completed' AND d.validity_status IS NULL"
+        + _kb_clause(kb_id)
+    )
+    result = await session.execute(
+        text(column_sql), {**_params(kb_id), "unknown": VALIDITY_STATUS_UNKNOWN}
+    )
+    updated = int(result.rowcount or 0)
+
+    # 父块本来就没有 metadata（只有子块带），所以按 IS NOT NULL 过滤，别给父块凭空造一个。
+    chunk_sql = (
+        "UPDATE chunks c SET metadata = "
+        "(coalesce(c.metadata::jsonb, '{}'::jsonb) || CAST(:patch AS jsonb))::json "
+        "FROM documents d "
+        "WHERE c.doc_id = d.id AND d.status = 'completed' "
+        "AND c.metadata IS NOT NULL "
+        "AND (c.metadata ->> 'validity_status') IS NULL"
+        + _kb_clause(kb_id)
+    )
+    await session.execute(
+        text(chunk_sql),
+        {**_params(kb_id), "patch": json.dumps({"validity_status": VALIDITY_STATUS_UNKNOWN})},
+    )
+    return updated
+
+
 async def _run(args: argparse.Namespace) -> int:
     kb_id = args.kb_id
 
     async with async_session() as session:
         pending = await _pending_count(session, kb_id)
         recoverable = await _recoverable_count(session, kb_id)
+        unknown = await _unknown_count(session, kb_id)
         before = await _distribution(session, kb_id)
 
         print("=" * 72)
         print(f"目标范围: {'全部知识库' if not kb_id else kb_id}")
         print(f"已完成但效力状态为空的文档: {pending}")
-        print(f"  其中能从 chunks 取到值的: {recoverable}")
-        print(f"  取不到值的（保持为空）:   {pending - recoverable}")
+        print(f"  第一步：能从 chunks 取到值，照抄过来: {recoverable}")
+        print(f"  第二步：源文件没给状态，落 0 未标注: {unknown}")
         print("当前 documents.validity_status 分布:")
         _print_distribution(before)
         print("=" * 72)
@@ -158,8 +212,11 @@ async def _run(args: argparse.Namespace) -> int:
                 return 1
 
         updated = await _backfill(session, kb_id)
+        # 第二步必须在第一步之后：先尽力抄真值，抄不到的才算"源文件没给"。
+        marked_unknown = await _backfill_unknown(session, kb_id)
         await session.commit()
-        print(f"回填完成: {updated} 份文档写入 validity_status。")
+        print(f"第一步完成: {updated} 份文档照抄了 chunks 里的值。")
+        print(f"第二步完成: {marked_unknown} 份文档落成 0 未标注（列 + 子块元数据）。")
 
         after = await _distribution(session, kb_id)
         print("回填后 documents.validity_status 分布:")

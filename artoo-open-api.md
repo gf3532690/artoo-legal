@@ -20,7 +20,7 @@
 | 1 | **检索默认带上「全局法条库」** | `POST /api/retrieval/search` 会把调用方传入的 `kb_ids` 与全局法条库自动合并检索；**即使不传任何检索范围也会返回该库结果**（上游此处返回 `400`） |
 | 2 | **`top_k` 默认值为 5** | 字段名不变，仅本部署默认值由 `10` 调为 `5` |
 | 3 | **不再支持 `session_id`** | 会话附件链路随非召回链路一并移除；相关章节标为「本部署未启用」 |
-| 4 | **结果 `metadata` 追加法条字段** | 身份与结构：`law_name`、`article_number`、`article_label`、`chapter`、`article_id`（`doc_id:条号`，无条号的文档不给）；效力与时间：`law_type`、`issuing_authority`、`publish_date`、`effective_date`、`validity_status`；地域：`province`、`city`；来源：`source`（取值 `global` / `personal`）。**取不到的字段整键缺失**（不是 `null`），客户端需按可空处理。`validity_status` 是数据源的效力状态枚举，服务端**原样下发**：`3` 现行有效 / `2` 已修改 / `0` 未标注 / `4` 尚未生效 / `1` 已废止 / `-1` 已失效（见第 12 条与 `docs/legal-retrieval-api.md`）。**同一条号命中的多个版本/多个法怎么排序看 `publish_date`**：它是本文件所载版本的公布日，而不是正文里的原始通过日（两者在 68.5% 的文档上不同，用错了会把新版显示成旧版） |
+| 4 | **结果 `metadata` 追加法条字段** | 身份与结构：`law_name`、`article_number`、`article_label`、`chapter`、`article_id`（`doc_id:条号`，无条号的文档不给）；效力与时间：`law_type`、`issuing_authority`、`publish_date`、`effective_date`、`validity_status`、`validity_status_label`；地域：`province`、`city`；来源：`source`（取值 `global` / `personal`）。**取不到的字段整键缺失**（不是 `null`），客户端需按可空处理——**`validity_status` 例外且是反向的**：解析完成的文档它总是有值，源文件没标状态时落 `0` 未标注。`validity_status` 是数据源的效力状态枚举，服务端**原样下发**并附带中文描述 `validity_status_label`（`现行有效` / `已废止` / …）：`3` 现行有效 / `2` 已修改 / `0` 未标注 / `4` 尚未生效 / `1` 已废止 / `-1` 已失效（见第 12 条与 `docs/legal-retrieval-api.md`）。**同一条号命中的多个版本/多个法怎么排序看 `publish_date`**：它是本文件所载版本的公布日，而不是正文里的原始通过日（两者在 68.5% 的文档上不同，用错了会把新版显示成旧版） |
 | 5 | **非召回章节未启用** | 第 6.2～6.6 节（对话问答、Agent、MCP）与第 7、8 节（会话管理、会话临时文件）在本部署中不存在 |
 | 6 | **代理 Key 的外部用户落在默认租户** | 1.2 / 1.3 的代理 Key 通道在本部署**可用**，但外部用户不再落在内置「外部用户租户」，而是落在默认租户（配置 `EXTERNAL_USER_TENANT_ID`），否则跨租户读不到全局法条库。另提供更适合单身份接入的「用户级 Key」。两种方式详见 2.0 |
 | 7 | **检索请求支持法条过滤** | 新增三个可选请求字段：`law_levels`（效力层级枚举，见 6.1）、`province`、`city`。**地域过滤保留国家层面法规**：指定省市时只筛地方性法规，`province` 为空的文档（法律 / 行政法规 / 司法解释等）始终保留。PRD F-105 的「地方性法规优先展示」按**过滤**实现（指定省市 = 只看该省市 + 国家层面），不是排序加权 |
@@ -28,7 +28,7 @@
 | 9 | **检索请求支持分页** | 新增可选请求字段 `page`（默认 `1`，每页 `top_k` 条），响应新增 `page` / `page_size` / `has_more`。**`total` 仍是「本次返回条数」，不是命中总数**——向量召回的候选池有上限，没有意义的「总命中数」；翻页只看 `has_more`（服务端多取一条探出来的，不是估计）。分页窗口 `page × top_k` 上限 **100**，超过返回 `400` |
 | 10 | **检索请求支持精确模式** | 新增可选请求字段 `match_mode`（`semantic` 默认 / `exact`）。`exact` 会把查询里的「法名 + 条号」解析出来（如「民法典第一条」「刑法第234条」），直接按法条元数据定位那一条，返回 `mode="exact"` 且 `routes=["exact"]`——用于 PRD F-002 的编号精确检索：相似度排序无法把「第六条」与「第二十六条 / 第十六条」分开（实测 rerank 分差仅 0.3%）。解析不出或库里没有时**退回 semantic**，并在 `fallback_reason` 说明原因；exact 模式忽略 `law_levels` / `province` / `city`（条号已唯一确定那一条） |
 | 11 | **新增法条详情端点** | `GET /api/legal/articles/{article_id}`：按检索结果里下发的 `article_id`（`{doc_id}:{article_number}`）取条文全文、所属法名、条号、效力层级、地域、发布/施行日期、时效状态。读授权与检索同一道闸门（不可读 → `404`）。**不返回修订历史与关联司法解释**——语料里没有这两类数据，返回空数组会被误读为「该法条恰好没有」 |
-| 12 | **检索默认排除已废止/已失效法条** | 新增可选请求字段 `include_invalid`（默认 `false`）：默认剔除 `validity_status` 为 `1`（已废止）与 `-1`（已失效）的条文，只返回仍有法律效力的；置 `true` 可一并查历史版本（如按行为发生时的法律）。被剔除条数由响应新增字段 `filtered_invalid_count` 回显。**只作用于语义召回**：`match_mode=exact` 与法条详情按 ID 点名取，不受影响。过滤发生在召回之后（该字段尚未做成 Milvus 标量），服务端按约 4 倍放大候选量补偿，因此极端情况下返回条数可能少于 `top_k` |
+| 12 | **检索不按效力状态过滤，状态随结果下发** | 六种取值一律返回（含 `1` 已废止与 `-1` 已失效），每条结果的 `metadata` 里附 `validity_status`（原值）与 `validity_status_label`（中文，如 `现行有效` / `已废止`）。要只看现行有效、或排除某几种，由调用方按这两个字段自行判断——服务端把状态发出来就是为了这个。（2026-09-15 曾实现为"默认排除 + `include_invalid` 放开"，该口径已取消：请求字段 `include_invalid` 与响应字段 `filtered_invalid_count` 一并移除） |
 
 ---
 

@@ -91,7 +91,6 @@ class TestResponseEnvelope:
         "has_more",
         "match_mode",
         "fallback_reason",
-        "filtered_invalid_count",
     }
 
     def test_envelope_keys_are_exactly_the_documented_set(self) -> None:

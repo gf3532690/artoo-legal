@@ -41,7 +41,7 @@ from app.pipeline.legal_metadata import (
     LegalMetadataExtractor,
     analyze_legal_document,
     build_content_prefix,
-    document_validity_status,
+    resolve_document_validity_status,
 )
 from app.pipeline.progress import PipelineStage, ProgressTracker
 from app.schema.db import Chunk, Document, KnowledgeBase
@@ -820,12 +820,14 @@ class DocumentPipeline:
                 # ─── 完成 ───
                 # 文档级效力状态随完成一起落库：文件列表要按它过滤，落在 documents 上
                 # 才能走索引（chunks 的 JSON 列上做不了快速等值过滤）。
+                # 用 resolve_ 而不是 document_validity_status：源文件没标状态时落 0 未标注，
+                # 而不是留空（留空在列表上既没有徽标、也筛不出来，而它本来就是未标注）。
                 await self._update_status(
                     session,
                     doc_id,
                     "completed",
                     chunk_count=child_count,
-                    validity_status=document_validity_status(legal_metadata),
+                    validity_status=resolve_document_validity_status(legal_metadata),
                 )
                 await session.commit()
                 await tracker.complete()
