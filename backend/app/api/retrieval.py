@@ -290,9 +290,8 @@ async def _exact_retrieval(
         )
         for row in rows
     ]
-    # 点名取那一条：exact 不受效期开关影响（要查已废止版本的原文也该能查到，
-    # 结果里带 validity_status 由调用方自行判断）。
-    items, _ = await _build_result_items(results, global_kb_ids=global_kb_ids)
+    # 点名取那一条：结果照常带 validity_status 与中文描述，由调用方自行判断还算不算数。
+    items = await _build_result_items(results, global_kb_ids=global_kb_ids)
     for item in items:
         item.routes = ["exact"]
     return RetrievalTestResponse(

@@ -151,3 +151,41 @@ async def test_empty_metadata_values_are_not_emitted(monkeypatch) -> None:
 
     metadata = items[0].metadata
     assert metadata == {"law_name": "某条例"}
+
+
+@pytest.mark.asyncio
+async def test_exact_path_goes_through_the_same_result_builder(monkeypatch) -> None:
+    """精确检索那条路径也必须走同一套结果构造。
+
+    它曾在 ``_build_result_items`` 改成"只返回一个列表"之后漏改，导致点「精确检索」直接
+    500（``ValueError: not enough values to unpack``）。精确路径不像语义路径那样有一堆
+    覆盖它的用例，所以这里把它单独钉一遍：既钉能跑通，也钉它同样带状态与中文描述。
+    """
+    _patch_sessions(
+        monkeypatch,
+        documents=[_Row(id="doc-1", filename="中华人民共和国民法典.docx")],
+        chunks=[_Row(id="ck-1", kb_id="kb-global", chunk_metadata=dict(_LEGAL_METADATA))],
+    )
+    rows = [
+        {
+            "chunk_id": "ck-1",
+            "doc_id": "doc-1",
+            "article_content": "第一百四十六条　具备下列条件…",
+            "child_content": "第一百四十六条　具备下列条件…",
+        }
+    ]
+
+    response = await retrieval_api._exact_retrieval(
+        retrieval_api.RetrievalTestRequest(
+            query="民法典第一百四十六条", match_mode=retrieval_api.MATCH_MODE_EXACT
+        ),
+        rows,
+        global_kb_ids=["kb-global"],
+    )
+
+    assert len(response.results) == 1
+    item = response.results[0]
+    assert item.routes == ["exact"]
+    assert item.metadata["article_id"] == "doc-1:146"
+    assert item.metadata["validity_status"] == 3
+    assert item.metadata["validity_status_label"] == "现行有效"
