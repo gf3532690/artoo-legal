@@ -83,6 +83,19 @@ to the switch, and a `fallback_reason` from an exact miss is surfaced rather tha
 swallowed. The two retrieval paths are the same implementation today; a page that
 depends on that coincidence would stop proving anything the day it stops being true.
 
+**The page's library picker is multi-select, and it always sends `kb_ids`.** The API has always
+accepted a list and switches to the multi-source path when it gets more than one, but the page could
+only pick a single library — so the behaviour integrators rely on was the one thing the page could
+not reproduce. It now ticks any number of libraries and sends `kb_ids` whether one is selected or
+five, so the payload shape does not change with the count. (The global legal library is merged
+server-side, so picking a single personal library already exercises the multi-source path.)
+
+**Results expose the `article_id` the detail endpoint takes.** Both retrieval capabilities return it
+inside `metadata`, but the page showed everything else about a hit — law name, article number, dates,
+status — and not that one field, leaving the raw response as the only place to read it. Each result
+now renders it: clicking the id switches to the 法条详情 capability and looks that article up, and a
+copy button puts the id on the clipboard.
+
 ## Alternatives considered
 
 **A relevance threshold instead of exact mode** (`min_score`, or exposing the
@@ -166,6 +179,8 @@ suites this is 177 passing tests.
 `frontend/src/pages/Retrieval.test.tsx` pins the page's wiring to those endpoints:
 the payload each capability hands to the API layer (semantic with `mode`/`top_k`,
 exact with `match_mode` only, detail by `article_id` and without a knowledge base),
-and that the article-detail response renders. A future refactor that quietly sends
-the page back to a private path fails the suite. All 37 frontend tests pass and
-`npm run build` succeeds.
+that selecting two libraries hands over `kb_ids` with both, and that clicking a
+result's `article_id` calls the detail endpoint with it; it also pins that the
+article-detail response renders. A future refactor that quietly sends the page back
+to a private path fails the suite. All the frontend tests pass and `npm run build`
+succeeds.

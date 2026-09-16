@@ -71,6 +71,7 @@ function searchResponseWithLegalMeta() {
         metadata: {
           law_name: '中华人民共和国民法典',
           article_label: '第一条',
+          article_id: 'd1:1',
           publish_date: '2020-05-28',
           effective_date: '2021-01-01',
           validity_status: 3,
@@ -88,8 +89,11 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 async function selectKb(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('combobox'))
-  await user.click(await screen.findByRole('option', { name: '全局法条库' }))
+  // 库选择器是多选下拉（DropdownMenuCheckboxItem，role=menuitemcheckbox）。勾选不会自动
+  // 关菜单（故意的，方便连选），所以这里手动 Esc 收起来，免得挡住后面的「检索」按钮。
+  await user.click(screen.getByRole('button', { name: /选择法条库/ }))
+  await user.click(await screen.findByRole('menuitemcheckbox', { name: '全局法条库' }))
+  await user.keyboard('{Escape}')
 }
 
 beforeEach(() => {
@@ -118,7 +122,7 @@ describe('检索测试页的能力切换', () => {
     expect(mockedSearch).toHaveBeenCalledTimes(1)
     expect(mockedSearch.mock.calls[0][0]).toEqual({
       query: '燃放烟花爆竹',
-      knowledge_base_id: 'kb-1',
+      kb_ids: ['kb-1'],
       match_mode: 'semantic',
       mode: 'hybrid',
       top_k: 10,
@@ -142,7 +146,7 @@ describe('检索测试页的能力切换', () => {
     expect(mockedSearch).toHaveBeenCalledTimes(1)
     expect(mockedSearch.mock.calls[0][0]).toEqual({
       query: '民法典第一条',
-      knowledge_base_id: 'kb-1',
+      kb_ids: ['kb-1'],
       match_mode: 'exact',
     })
   })
@@ -185,5 +189,55 @@ describe('检索测试页的能力切换', () => {
     expect(screen.getByText(/公布 2020-05-28/)).toBeInTheDocument()
     expect(screen.getByText(/施行 2021-01-01/)).toBeInTheDocument()
     expect(screen.getByText('现行有效')).toBeInTheDocument()
+  })
+
+  it('结果里的 article_id 点一下就用法条详情能力查它', async () => {
+    // 这两个能力返回的 metadata.article_id 就是详情接口的入参；页面上直接给出来，
+    // 否则想查详情只能去翻原始响应。
+    mockedSearch.mockResolvedValue(searchResponseWithLegalMeta() as never)
+    mockedArticle.mockResolvedValue({
+      article_id: 'd1:1',
+      law_name: '中华人民共和国民法典',
+      article_label: '第一条',
+      content: '为了保护民事主体的合法权益，调整民事关系，根据宪法，制定本法。',
+    } as never)
+    const user = userEvent.setup()
+    render(createElement(Retrieval), { wrapper })
+
+    await selectKb(user)
+    await user.type(screen.getByPlaceholderText(/输入检索查询/), '民法典第一条')
+    await user.click(screen.getByRole('button', { name: '检索' }))
+
+    await user.click(await screen.findByTitle('点一下用法条详情接口查这一条'))
+
+    expect(mockedArticle).toHaveBeenCalledWith('d1:1')
+    expect(await screen.findByText(/为了保护民事主体的合法权益/)).toBeInTheDocument()
+  })
+
+  it('法条库支持多选：勾两个就按两个库联合检索', async () => {
+    // 多库走接口的 kb_ids（服务端据此走多源联合召回）。单选时也发这个字段，
+    // 所以这里同时钉住"选一个"与"选两个"的入参形状一致。
+    mockedList.mockResolvedValue({
+      items: [
+        { id: 'kb-1', name: '全局法条库' },
+        { id: 'kb-2', name: '个人法条库' },
+      ],
+      total: 2,
+    } as never)
+    const user = userEvent.setup()
+    render(createElement(Retrieval), { wrapper })
+
+    await user.click(screen.getByRole('button', { name: /选择法条库/ }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: '全局法条库' }))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: '个人法条库' }))
+    await user.keyboard('{Escape}')
+
+    // 两个都勾上时触发器显示数量，而不是某一个的名字
+    expect(screen.getByRole('button', { name: /已选 2 个库/ })).toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText(/输入检索查询/), '燃放烟花爆竹')
+    await user.click(screen.getByRole('button', { name: '检索' }))
+
+    expect(mockedSearch.mock.calls[0][0]).toMatchObject({ kb_ids: ['kb-1', 'kb-2'] })
   })
 })

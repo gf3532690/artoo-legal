@@ -9,7 +9,9 @@ import {
   Plus,
   Clock,
   CornerDownRight,
+  Copy,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   retrievalApi,
   legalApi,
@@ -20,10 +22,19 @@ import {
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import RetrievalResultsSkeleton from '@/components/skeletons/RetrievalResultsSkeleton'
 import { metaText, metaValidityStatus, validityLabel, validityTone } from '@/lib/legalValidity'
+import { copyToClipboard } from '@/lib/clipboard'
 
 // 法条库类型
 interface KnowledgeBaseItem {
@@ -80,7 +91,7 @@ const CAPABILITIES = [
     value: 'article' as const,
     label: '法条详情',
     endpoint: 'GET /api/legal/articles/{article_id}',
-    inputHint: '粘贴检索结果里的 metadata.article_id，如：<doc_id>:146',
+    inputHint: '点检索结果里的 article_id 可直接带过来；也可手动粘贴，如：<doc_id>:146',
     needsKb: false,
   },
 ]
@@ -96,7 +107,8 @@ type QueryResult =
 function Retrieval() {
   const [capability, setCapability] = useState<Capability>('search')
   const [query, setQuery] = useState('')
-  const [selectedKb, setSelectedKb] = useState('')
+  // 法条库可多选：勾多个即走多源联合检索（接口的 kb_ids），顺序不影响结果。
+  const [selectedKbs, setSelectedKbs] = useState<string[]>([])
   const [mode, setMode] = useState('hybrid')
   const [topK, setTopK] = useState(10)
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
@@ -123,18 +135,27 @@ function Retrieval() {
   }, [validityOptions])
 
   // 按能力走各自的真实接口
+  //
+  // 参数可覆盖当前状态：结果卡片上的「查详情」要在同一次点击里切到详情能力并带上那一行的
+  // article_id —— 靠 setState 之后再读 state 拿到的是旧值（React 状态更新不是同步的）。
   const searchMutation = useMutation({
-    mutationFn: async (): Promise<QueryResult> => {
-      if (capability === 'article') {
-        return { kind: 'article', detail: await legalApi.article(query.trim()) }
+    mutationFn: async (override?: {
+      capability?: Capability
+      query?: string
+    }): Promise<QueryResult> => {
+      const cap = override?.capability ?? capability
+      const text = override?.query ?? query
+      if (cap === 'article') {
+        return { kind: 'article', detail: await legalApi.article(text.trim()) }
       }
       return {
         kind: 'search',
         res: await retrievalApi.search({
-          query,
-          knowledge_base_id: selectedKb,
+          query: text,
+          // 多选按并集检索；只勾一个时也走同一字段（服务端单库/多库走两条路径，语义一致）。
+          kb_ids: selectedKbs,
           // exact 只认「法名 + 条号」，mode / top_k 对它没有意义，直接不传。
-          ...(capability === 'exact'
+          ...(cap === 'exact'
             ? { match_mode: 'exact' as const }
             : { match_mode: 'semantic' as const, mode, top_k: topK }),
         }),
@@ -142,12 +163,27 @@ function Retrieval() {
     },
   })
 
+  /** 用某条结果的 article_id 直接查法条详情：切到详情能力、填好 id 并立即执行。 */
+  function handleOpenDetail(articleId: string) {
+    setCapability('article')
+    setQuery(articleId)
+    setExpandedItems(new Set())
+    searchMutation.mutate({ capability: 'article', query: articleId })
+  }
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     if (!query.trim()) return
-    if (activeCapability.needsKb && !selectedKb) return
+    if (activeCapability.needsKb && selectedKbs.length === 0) return
     setExpandedItems(new Set())
-    searchMutation.mutate()
+    searchMutation.mutate(undefined)
+  }
+
+  /** 勾选/取消一个法条库（多选取并集，顺序无意义）。 */
+  function toggleKb(id: string) {
+    setSelectedKbs((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+    )
   }
 
   const outcome = searchMutation.data
@@ -218,7 +254,9 @@ function Retrieval() {
             />
             <Button
               type="submit"
-              disabled={!query.trim() || (activeCapability.needsKb && !selectedKb) || isPending}
+            disabled={
+              !query.trim() || (activeCapability.needsKb && selectedKbs.length === 0) || isPending
+            }
               className="absolute right-1.5 top-1/2 -translate-y-1/2 h-9 gap-1.5 rounded-lg cursor-pointer"
             >
               {isPending ? (
@@ -234,18 +272,45 @@ function Retrieval() {
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* 法条库 */}
             {activeCapability.needsKb && (
-              <Select value={selectedKb} onValueChange={setSelectedKb}>
-                <SelectTrigger className="h-9 w-[200px] text-sm rounded-lg bg-card">
-                  <SelectValue placeholder="选择法条库" />
-                </SelectTrigger>
-                <SelectContent>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex h-9 w-[200px] cursor-pointer items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 text-sm transition-colors hover:bg-muted/40"
+                    title="可多选：勾选多个法条库即联合检索（取并集）"
+                  >
+                    <span className="truncate">
+                      {selectedKbs.length === 0
+                        ? '选择法条库'
+                        : selectedKbs.length === 1
+                          ? (knowledgeBases.find((kb) => kb.id === selectedKbs[0])?.name ??
+                            '已选 1 个库')
+                          : `已选 ${selectedKbs.length} 个库`}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-[320px] w-[260px] overflow-auto">
+                  <DropdownMenuLabel>法条库（可多选，取并集）</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
                   {knowledgeBases.map((kb) => (
-                    <SelectItem key={kb.id} value={kb.id}>
-                      {kb.name}
-                    </SelectItem>
+                    <DropdownMenuCheckboxItem
+                      key={kb.id}
+                      checked={selectedKbs.includes(kb.id)}
+                      // 勾选后别关菜单：这个控件本来就是给人多选的
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={() => toggleKb(kb.id)}
+                    >
+                      <span className="truncate">{kb.name}</span>
+                    </DropdownMenuCheckboxItem>
                   ))}
-                </SelectContent>
-              </Select>
+                  {selectedKbs.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setSelectedKbs([])}>清空选择</DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
 
             {/* 模式与 Top-K 只对关键词检索有意义：exact 只认「法名 + 条号」，两者都不参与 */}
@@ -359,6 +424,7 @@ function Retrieval() {
                 onToggle={() => toggleExpand(idx)}
                 isHybrid={!!data?.trace}
                 validityLabels={validityLabels}
+                onOpenDetail={handleOpenDetail}
               />
             ))}
           </div>
@@ -456,6 +522,7 @@ function ResultCard({
   onToggle,
   isHybrid,
   validityLabels,
+  onOpenDetail,
 }: {
   result: RetrievalResultItem
   index: number
@@ -463,6 +530,8 @@ function ResultCard({
   onToggle: () => void
   isHybrid: boolean
   validityLabels?: Record<number, string>
+  /** 点结果里的 article_id 直接查法条详情（页面负责切能力与填 id） */
+  onOpenDetail: (articleId: string) => void
 }) {
   const hasParent =
     !!result.content && !!result.child_content && result.content !== result.child_content
@@ -473,10 +542,12 @@ function ResultCard({
   const articleLabel = metaText(result.metadata, 'article_label')
   const publishDate = metaText(result.metadata, 'publish_date')
   const effectiveDate = metaText(result.metadata, 'effective_date')
+  // 法条详情接口要的就是它（`{doc_id}:{条号}`）；无条号的文档上游不给这个键。
+  const articleId = metaText(result.metadata, 'article_id')
   const validityStatus = metaValidityStatus(result.metadata)
   const validity = validityLabel(validityStatus, validityLabels)
   const hasLegalIdentity =
-    !!lawName || !!articleLabel || !!publishDate || !!effectiveDate || !!validity
+    !!lawName || !!articleLabel || !!publishDate || !!effectiveDate || !!validity || !!articleId
 
   // 最终分数配色（语义化：高/中/低）
   function scoreColor(score: number) {
@@ -564,6 +635,32 @@ function ResultCard({
               >
                 {validity}
               </span>
+            )}
+            {/* article_id：法条详情接口的入参。点它直接查详情，旁边的按钮只复制——
+                没有这个显示，就只能去翻原始响应才能拿到这条 id。 */}
+            {articleId && (
+              <>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  title="点一下用法条详情接口查这一条"
+                  onClick={() => onOpenDetail(articleId)}
+                >
+                  {articleId}
+                </button>
+                <button
+                  type="button"
+                  className="flex cursor-pointer items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                  title={`复制 article_id：${articleId}`}
+                  onClick={() => {
+                    copyToClipboard(articleId)
+                    toast('已复制 article_id')
+                  }}
+                >
+                  <Copy className="h-3 w-3" />
+                  复制
+                </button>
+              </>
             )}
           </div>
         )}
