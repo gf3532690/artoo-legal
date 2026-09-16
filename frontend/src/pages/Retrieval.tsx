@@ -40,6 +40,8 @@ import { copyToClipboard } from '@/lib/clipboard'
 interface KnowledgeBaseItem {
   id: string
   name: string
+  /** 全局法条库标记：它由服务端**默认并入**每一个检索请求，用来判断会不会变成多源 */
+  config?: { is_default_legal_kb?: boolean } | null
 }
 
 // 路由展示元信息：标签、配色（数据色，区别于品牌绿主色）、说明
@@ -133,6 +135,20 @@ function Retrieval() {
     for (const option of validityOptions ?? []) map[option.value] = option.label
     return Object.keys(map).length > 0 ? map : undefined
   }, [validityOptions])
+
+  /**
+   * 模式选择是否有效。
+   *
+   * 多源联合召回固定走混合（服务端忽略 `mode`），所以只有**实际只有一个检索源**时
+   * 「直接检索 / 混合检索」才有意义。注意全局法条库会被服务端默认并入：只勾一个个人库时
+   * 实际是两个源，同样不可选——否则这个控件就是在撒谎。
+   *
+   * 还没选库时不禁用：那时「检索」本来就点不了，先灰掉只会让人以为控件坏了。
+   */
+  const globalKbId = knowledgeBases.find((kb) => kb.config?.is_default_legal_kb === true)?.id
+  const willBeMultiSource =
+    selectedKbs.length > 1 || (!!globalKbId && !selectedKbs.includes(globalKbId))
+  const modeSelectable = selectedKbs.length === 0 || !willBeMultiSource
 
   // 按能力走各自的真实接口
   //
@@ -316,14 +332,26 @@ function Retrieval() {
             {/* 模式与 Top-K 只对关键词检索有意义：exact 只认「法名 + 条号」，两者都不参与 */}
             {capability === 'search' && (
               <>
-                {/* 模式分段控件 */}
-                <div className="inline-flex h-9 items-center rounded-lg bg-muted/60 p-0.5">
+                {/* 模式分段控件。多源时置灰：那条路径固定混合召回，服务端根本不看它 */}
+                <div
+                  className={`inline-flex h-9 items-center rounded-lg bg-muted/60 p-0.5 ${
+                    modeSelectable ? '' : 'opacity-50'
+                  }`}
+                  title={
+                    modeSelectable
+                      ? undefined
+                      : '多源联合检索固定走混合召回（服务端忽略「直接检索」），所以这里不可选'
+                  }
+                >
                   {MODES.map((m) => (
                     <button
                       key={m.value}
                       type="button"
+                      disabled={!modeSelectable}
                       onClick={() => setMode(m.value)}
-                      className={`h-8 px-3.5 text-sm rounded-md transition-colors cursor-pointer ${
+                      className={`h-8 px-3.5 text-sm rounded-md transition-colors ${
+                        modeSelectable ? 'cursor-pointer' : 'cursor-not-allowed'
+                      } ${
                         mode === m.value
                           ? 'bg-card text-foreground shadow-sm font-medium'
                           : 'text-muted-foreground hover:text-foreground'
@@ -333,6 +361,9 @@ function Retrieval() {
                     </button>
                   ))}
                 </div>
+                {!modeSelectable && (
+                  <span className="text-[11px] text-muted-foreground">多源固定混合</span>
+                )}
 
                 {/* Top-K 步进器 */}
                 <div className="inline-flex h-9 items-center rounded-lg bg-card border border-border/70 overflow-hidden">

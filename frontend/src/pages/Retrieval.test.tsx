@@ -240,4 +240,43 @@ describe('检索测试页的能力切换', () => {
 
     expect(mockedSearch.mock.calls[0][0]).toMatchObject({ kb_ids: ['kb-1', 'kb-2'] })
   })
+
+  it('多选时检索方式不可选：多源固定走混合召回', async () => {
+    mockedList.mockResolvedValue({
+      items: [
+        { id: 'kb-1', name: '全局法条库', config: { is_default_legal_kb: true } },
+        { id: 'kb-2', name: '个人法条库', config: {} },
+      ],
+      total: 2,
+    } as never)
+    const user = userEvent.setup()
+    render(createElement(Retrieval), { wrapper })
+
+    await user.click(screen.getByRole('button', { name: /选择法条库/ }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: '全局法条库' }))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: '个人法条库' }))
+    await user.keyboard('{Escape}')
+
+    expect(screen.getByRole('button', { name: '直接检索' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '混合检索' })).toBeDisabled()
+    expect(screen.getByText('多源固定混合')).toBeInTheDocument()
+  })
+
+  it('只勾全局法条库时检索方式仍可选（服务端合并后只有一个源）', async () => {
+    mockedList.mockResolvedValue({
+      items: [
+        { id: 'kb-1', name: '全局法条库', config: { is_default_legal_kb: true } },
+        { id: 'kb-2', name: '个人法条库', config: {} },
+      ],
+      total: 2,
+    } as never)
+    const user = userEvent.setup()
+    render(createElement(Retrieval), { wrapper })
+
+    await user.click(screen.getByRole('button', { name: /选择法条库/ }))
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: '全局法条库' }))
+    await user.keyboard('{Escape}')
+
+    expect(screen.getByRole('button', { name: '直接检索' })).toBeEnabled()
+  })
 })

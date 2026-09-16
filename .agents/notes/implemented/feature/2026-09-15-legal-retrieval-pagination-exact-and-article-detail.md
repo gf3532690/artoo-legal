@@ -88,7 +88,10 @@ accepted a list and switches to the multi-source path when it gets more than one
 only pick a single library — so the behaviour integrators rely on was the one thing the page could
 not reproduce. It now ticks any number of libraries and sends `kb_ids` whether one is selected or
 five, so the payload shape does not change with the count. (The global legal library is merged
-server-side, so picking a single personal library already exercises the multi-source path.)
+server-side, so picking a single personal library already exercises the multi-source path.) That
+path ignores `mode` entirely, so the page now disables the 直接检索 / 混合检索 selector whenever the
+effective source count is more than one, with a short 「多源固定混合」 note next to it — offering a
+switch the server never reads is worse than not offering it.
 
 **Results expose the `article_id` the detail endpoint takes.** Both retrieval capabilities return it
 inside `metadata`, but the page showed everything else about a hit — law name, article number, dates,

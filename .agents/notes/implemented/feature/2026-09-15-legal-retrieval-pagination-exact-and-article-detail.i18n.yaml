@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-15-legal-retrieval-pagination-exact-and-article-detail.md .agents/notes/implemented/feature/2026-09-15-legal-retrieval-pagination-exact-and-article-detail.zh.md
-2026-09-15-legal-retrieval-pagination-exact-and-article-detail.md: 1ba80115d268af8d0e6da995426941bd4fadd029
-2026-09-15-legal-retrieval-pagination-exact-and-article-detail.zh.md: 44b08c80a91bc85821d9b3cccf391c557caccda6
+2026-09-15-legal-retrieval-pagination-exact-and-article-detail.md: 17687a3c8ad6a1636bb5f6a0838042708554bfd5
+2026-09-15-legal-retrieval-pagination-exact-and-article-detail.zh.md: c2c9cf0bc3d566172841fda74fe7662bde444dc0
