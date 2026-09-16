@@ -35,6 +35,10 @@ endpoint both returns it and filters on it.
 - **The enum is served, not duplicated.** `GET /api/legal/validity-statuses` returns
   `[{value, label}]`. The frontend renders labels from that response; it does not carry its own
   copy. This enum has been read backwards once already — `0` 未标注 and `-1` 已失效.
+- **The control is a row of status tags, not a dropdown.** Clicking a tag toggles whether that
+  status is shown; with none selected everything is shown, and the leading 全部 tag is what
+  expresses that state. Hiding both the options and the current selection behind one more click is
+  the wrong shape on the one page whose whole job is looking at files by status.
 
 ### Why a column instead of deriving at read time
 

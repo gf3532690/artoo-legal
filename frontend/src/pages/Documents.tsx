@@ -24,8 +24,6 @@ import {
   Network,
   Link2,
   X,
-  Filter,
-  ChevronDown,
 } from 'lucide-react'
 import { documentApi, knowledgeBaseApi, folderApi, systemApi, legalApi } from '@/lib/api'
 import type { PageResult, KBCapacity } from '@/lib/api'
@@ -51,15 +49,6 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu'
 import FileItem from '@/components/documents/FileItem'
 import FolderItem from '@/components/documents/FolderItem'
 import FolderBreadcrumb from '@/components/documents/FolderBreadcrumb'
@@ -91,6 +80,20 @@ interface KnowledgeBaseItem {
 interface BreadcrumbItem {
   id: string | null
   name: string
+}
+
+/**
+ * 效力状态标签的样式。
+ *
+ * 反选语义：**选中 = 该状态参与展示**，一个都不选 = 全部状态都展示（由「全部」标签表达）。
+ * 所以标签是"勾上了才显示"，而不是"全部显示、点掉就藏"——后者在什么都没点时含义是空的。
+ */
+function validityTagClass(active: boolean): string {
+  return `rounded-full border px-2 py-0.5 text-[11px] leading-normal cursor-pointer transition-colors ${
+    active
+      ? 'border-primary/40 bg-primary/10 text-primary font-medium'
+      : 'border-border text-muted-foreground hover:bg-muted/40'
+  }`
 }
 
 // 工具栏按钮：artifact 打开（收起为纯图标）时套 Tooltip 显示中文名；展开时按钮自带文字，
@@ -741,7 +744,8 @@ function Documents() {
         {/* 操作按钮（只读库隐藏全部写操作入口）。
             artifact 预览打开时列表区被压窄，按钮收起为纯图标（套 Tooltip 显示中文名）以自适应。 */}
         <TooltipProvider delayDuration={200}>
-        <div className="flex items-center gap-2 shrink-0">
+        {/* 窄屏时状态标签换行而不是把工具栏撑破 */}
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
           {/* 知识图谱入口：仅全局+KB 双开关均启用时出现（design.md 5.3.1）。
               读权限用户亦可查看图谱，故不受 canWrite 限制。 */}
           {showGraphEntry && (
@@ -893,49 +897,35 @@ function Documents() {
       <div className="flex items-center justify-between mb-4 shrink-0">
         <FolderBreadcrumb items={breadcrumb} onNavigate={navigateToFolder} />
         <div className="flex items-center gap-2 shrink-0">
-          {/* 法条库专有：按生效效力筛选文件（多选取并集，服务端过滤）。
-              非法条库不显示——那里的文档这个字段一律为空，摆一个永远筛不出东西的
-              控件只会让人以为文件丢了。 */}
+          {/* 法条库专有：效力状态标签常驻在工具栏，点一下切换「该状态是否展示」
+              （多选取并集，过滤在服务端做）。做成常驻标签而不是下拉，是因为这一页的
+              主要动作就是按状态看文件：状态得先看得见，切一次只要一下。
+              非法条库不显示——那里的文档这个字段一律为空，摆一排永远筛不出东西的标签
+              只会让人以为文件丢了。 */}
           {isLegalKb && validityOptions && validityOptions.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className={`flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs cursor-pointer transition-colors hover:bg-muted/40 ${
-                    validityFilter.length > 0 ? 'text-primary border-primary/40 bg-primary/5' : 'text-muted-foreground'
-                  }`}
-                  onClick={(e) => e.stopPropagation()}
-                  title="按效力状态筛选文件"
-                >
-                  <Filter className="h-3.5 w-3.5" />
-                  效力状态
-                  {validityFilter.length > 0 && <span>（{validityFilter.length}）</span>}
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuLabel>按效力状态筛选</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {validityOptions.map((option) => (
-                  <DropdownMenuCheckboxItem
+            <div className="flex flex-wrap items-center justify-end gap-1">
+              <button
+                className={validityTagClass(validityFilter.length === 0)}
+                onClick={(e) => { e.stopPropagation(); setValidityFilter([]) }}
+                title="显示全部效力状态"
+              >
+                全部
+              </button>
+              {validityOptions.map((option) => {
+                const active = validityFilter.includes(option.value)
+                return (
+                  <button
                     key={option.value}
-                    checked={validityFilter.includes(option.value)}
-                    onCheckedChange={() => toggleValidityFilter(option.value)}
-                    // 勾选后别关闭菜单：这个控件本来就是给人多选的
-                    onSelect={(e) => e.preventDefault()}
+                    className={validityTagClass(active)}
+                    aria-pressed={active}
+                    onClick={(e) => { e.stopPropagation(); toggleValidityFilter(option.value) }}
+                    title={active ? `不再只看「${option.label}」` : `只看「${option.label}」`}
                   >
                     {option.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {validityFilter.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setValidityFilter([])}>
-                      清除筛选
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  </button>
+                )
+              })}
+            </div>
           )}
         <div className="flex items-center border border-border rounded-lg p-0.5 shrink-0">
           <button
