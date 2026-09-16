@@ -26,6 +26,8 @@ install-graph:
 # ============================================================
 # 本地开发（中间件用 docker，应用跑在宿主机热重载）
 # ============================================================
+# Windows 上没有 make 时用等价脚本：scripts/dev-local.ps1（-Stop / -SkipInfra / -NoWorker /
+# -Python <解释器>）。两者做的事一样：只把中间件放进 docker，应用在宿主机带热重载跑。
 # 启动中间件（compose 自动叠加 docker-compose.override.yml，暴露端口到宿主机）
 infra:
 	@echo "启动中间件（etcd/minio/milvus/postgres/redis）..."

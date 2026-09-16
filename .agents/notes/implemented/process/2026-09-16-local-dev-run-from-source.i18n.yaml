@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the Git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority; after
+# editing either side, bring the other along and re-record both hashes with:
+#   git hash-object .agents/notes/implemented/process/2026-09-16-local-dev-run-from-source.md .agents/notes/implemented/process/2026-09-16-local-dev-run-from-source.zh.md
+2026-09-16-local-dev-run-from-source.md: 598d57980d206c759aa9916556bf3f0841837cd8
+2026-09-16-local-dev-run-from-source.zh.md: 1e97ec5e404fbe45c122482b91dce842ed2e4c0d
