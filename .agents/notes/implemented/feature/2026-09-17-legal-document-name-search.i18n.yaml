@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state. After editing either side, bring the other
+# along and re-record with:
+#   git hash-object .agents/notes/implemented/feature/2026-09-17-legal-document-name-search.md .agents/notes/implemented/feature/2026-09-17-legal-document-name-search.zh.md
+2026-09-17-legal-document-name-search.md: 6b6cab5e9eb28e6104c6306ce1caf0f964696f09
+2026-09-17-legal-document-name-search.zh.md: e295d22ed81bf4df55cac50e7a57b75e236f5764

@@ -206,12 +206,15 @@ export const documentApi = {
   list: (
     kbId: string,
     folderId?: string | null,
-    params?: { page?: number; page_size?: number; validityStatus?: number[] }
+    params?: { page?: number; page_size?: number; validityStatus?: number[]; q?: string }
   ) => {
     const qs = new URLSearchParams()
     if (folderId) qs.set('folder_id', folderId)
     qs.set('page', String(params?.page ?? 1))
     qs.set('page_size', String(params?.page_size ?? 20))
+    // 名称搜索：服务端按文件名做子串匹配（含分页），不是把已加载的几页在前端筛。
+    // 空格交给服务端 trim，这里只负责别把空串当成一个筛选条件发出去。
+    if (params?.q && params.q.trim()) qs.set('q', params.q.trim())
     // 效力状态多选：同名参数重复传，服务端按并集过滤（union），不是取交集
     for (const value of params?.validityStatus ?? []) {
       qs.append('validity_status', String(value))

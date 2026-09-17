@@ -1,5 +1,5 @@
 import { copyToClipboard } from '@/lib/clipboard'
-import { useState, useCallback, useMemo, useRef } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -186,6 +186,14 @@ function Documents() {
   // 法条库「效力状态」筛选：多选取并集，空数组=不过滤。过滤在服务端做（走
   // documents.validity_status 上的索引），不是把整页数据拉下来在前端筛。
   const [validityFilter, setValidityFilter] = useState<number[]>([])
+  /** 名称搜索框里的原文（受控输入），与真正发给服务端的 keyword 之间隔一层防抖 */
+  const [keywordInput, setKeywordInput] = useState('')
+  /**
+   * 真正参与查询的名称关键字。
+   * <p>防抖 300ms：列表是服务端过滤 + 无限滚动，每敲一个字就打一次接口，会让分页状态
+   * 反复重建、滚动位置乱跳，输入体验反而更差。
+   */
+  const [keyword, setKeyword] = useState('')
   /** 正在手动维护效力状态的文件（null = 弹窗关闭）与草稿值 */
   const [statusTarget, setStatusTarget] = useState<StatusTarget | null>(null)
   const [statusDraft, setStatusDraft] = useState<number | null>(null)
@@ -276,6 +284,12 @@ function Documents() {
   })
   const folders = foldersData?.pages.flatMap((p) => p.items) ?? []
 
+  // 名称搜索防抖：输入停下来 300ms 才换查询条件
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(keywordInput.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [keywordInput])
+
   // 获取当前目录下的文档（分页 + 滚动加载）
   const {
     data: documentsData,
@@ -284,14 +298,15 @@ function Documents() {
     hasNextPage: hasMoreDocuments,
     isFetchingNextPage: isFetchingDocuments,
   } = useInfiniteQuery({
-    // 筛选值进 queryKey：改筛选条件即换一条查询，分页从头开始，不会把两种筛选的
+    // 筛选值与搜索词进 queryKey：改条件即换一条查询，分页从头开始，不会把两种条件的
     // 结果页拼在一起。
-    queryKey: ['documents', kbId, currentFolderId, validityFilter],
+    queryKey: ['documents', kbId, currentFolderId, validityFilter, keyword],
     queryFn: ({ pageParam }) =>
       documentApi.list(kbId!, currentFolderId, {
         page: pageParam,
         page_size: PAGE_SIZE,
         validityStatus: validityFilter,
+        q: keyword || undefined,
       }) as Promise<PageResult<DocumentItem>>,
     initialPageParam: 1,
     getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.page + 1 : undefined),
@@ -772,7 +787,15 @@ function Documents() {
       })),
   ]
 
-  const totalItems = folders.length + allFiles.length
+  /**
+   * 名称搜索：只筛文件，不筛文件夹。
+   * <p>文件夹由另一个接口拉取、且没有名称匹配语义，搜索时继续列出来只会让人以为
+   * 「关键词没生效」——而且 `totalItems` 会被文件夹撑住，匹配不到任何文件时那屏
+   * 「没有匹配」的空状态也出不来。
+   */
+  const searching = keyword.length > 0
+  const visibleFolders = searching ? [] : folders
+  const totalItems = visibleFolders.length + allFiles.length
 
   // ============================================================
   // 渲染
@@ -963,7 +986,7 @@ function Documents() {
         </div>
       )}
 
-      {/* 工具栏：左边是「在哪里 + 看哪些状态」，右边是视图切换。
+      {/* 工具栏：左边是「在哪里 + 看哪些状态」，右边是搜索框与视图切换。
           根目录刻意不显示面包屑——它的「全部文件」和标签里的「全部」说的是同一件事，
           并排摆着只会让人猜哪个才是筛选；进入文件夹之后它才出现，那时它是导航，不是标题。 */}
       <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0">
@@ -1001,7 +1024,32 @@ function Documents() {
           </div>
         )}
 
-        <div className="ml-auto flex items-center border border-border rounded-lg p-0.5 shrink-0">
+        {/* 名称搜索：按文件名（即法名）的子串找文件。过滤在服务端做，分页数与匹配数
+            才对得上——把已加载的几页在前端筛，翻页时会出现「明明有匹配却过不去」。
+            法条库文件多（全局库两万多份），这一条是主要的找人方式，所以常驻在工具栏。 */}
+        <div className="relative ml-auto w-40 sm:w-56 shrink-0">
+          <FileSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={keywordInput}
+            onChange={(e) => setKeywordInput(e.target.value)}
+            placeholder={isLegalKb ? '搜索法名 / 文件名' : '搜索文件名'}
+            aria-label="按名称搜索文件"
+            className="h-8 pl-8 pr-7 text-sm"
+          />
+          {keywordInput && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setKeywordInput('') }}
+              title="清空搜索"
+              aria-label="清空搜索"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center border border-border rounded-lg p-0.5 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setViewMode('grid') }}
             className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
@@ -1031,9 +1079,19 @@ function Documents() {
               <FileText className="h-10 w-10 text-muted-foreground/40" />
             </div>
             <p className="text-muted-foreground mb-1">
-              {currentFolderId ? '此文件夹为空' : '暂无文档'}
+              {searching
+                ? `没有匹配「${keyword}」的文件`
+                : currentFolderId ? '此文件夹为空' : '暂无文档'}
             </p>
-            {canWrite ? (
+            {searching ? (
+              <Button
+                variant="outline"
+                onClick={(e) => { e.stopPropagation(); setKeywordInput('') }}
+                className="cursor-pointer"
+              >
+                清空搜索
+              </Button>
+            ) : canWrite ? (
               <>
                 <p className="text-sm text-muted-foreground/70 mb-4">拖拽文件到此处或点击上传按钮</p>
                 <div className="flex gap-2">
@@ -1065,7 +1123,7 @@ function Documents() {
             style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(116px, 1fr))' }}
           >
             {/* 文件夹列表 */}
-            {folders.map((folder) => (
+            {visibleFolders.map((folder) => (
               <ContextMenu key={folder.id}>
                 <ContextMenuTrigger>
                   <FolderItem
@@ -1243,7 +1301,7 @@ function Documents() {
                 </tr>
               </thead>
               <tbody>
-                {folders.map((folder) => (
+                {visibleFolders.map((folder) => (
                   <tr
                     key={folder.id}
                     className={`border-b border-border/50 last:border-0 transition-colors cursor-pointer ${

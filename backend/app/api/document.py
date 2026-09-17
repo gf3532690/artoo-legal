@@ -45,6 +45,22 @@ from app.storage.object_store import (
 logger = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------------
+# 文档列表的名称模糊搜索
+# ------------------------------------------------------------------
+
+
+def _like_substring_pattern(raw: str) -> str:
+    """把用户输入转成 ``ILIKE`` 用的子串模式，并转义 LIKE 通配符。
+
+    为什么必须转义：用户输入里的 ``%`` 与 ``_`` 在 LIKE 里是通配符，不转义的话搜
+    ``"办法_"`` 会把「办法A」「办法B」全都匹配上——搜索框的语义是「文件名里含这几个
+    字符」，不是「按用户写的通配符匹配」。反斜杠先转，否则会把后面补的转义符再转一遍。
+    """
+    escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 # Redis 降级时的进程内回退并发上限：防止 Redis 不可用时，大量上传一起涌入
 # API 进程把事件循环/内存压垮。超过上限的任务会等待空闲额度（而非无限堆积）。
 # 注意：正常路径走 Redis + 独立 Worker，根本不触发此回退；这是降级路径的护栏。
@@ -428,6 +444,16 @@ async def _enqueue_or_fallback(
 async def list_documents(
     kb_id: str,
     folder_id: str | None = None,
+    q: Annotated[
+        str | None,
+        Query(
+            description=(
+                "按文件名模糊搜索（不区分大小写的子串匹配，前后空格忽略）。"
+                "列表展示的「法名」在实践中就是文件名去掉扩展名，所以这既是「按文件名找」，"
+                "也是「按法名找」。不传或传空=不过滤。"
+            )
+        ),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
     validity_status: Annotated[
@@ -468,6 +494,11 @@ async def list_documents(
     # 只读访客：仅展示已完成文档
     if not can_write:
         cond.append(Document.status == "completed")
+    # 名称模糊搜索：ILIKE 子串匹配文件名（23,000 份的规模下顺序扫描是毫秒级，
+    # 而 `%..%` 本来也用不上 btree 索引，因此不为它建索引）。
+    keyword = (q or "").strip()
+    if keyword:
+        cond.append(Document.filename.ilike(_like_substring_pattern(keyword), escape="\\"))
     # 法条效力状态：多选按并集过滤。走 documents.validity_status 上的索引
     # （`ix_documents_validity_status`），不去扫 chunks 的 JSON 列。
     if validity_status:
