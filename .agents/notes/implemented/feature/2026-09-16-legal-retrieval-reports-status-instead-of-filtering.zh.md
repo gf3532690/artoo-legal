@@ -4,6 +4,11 @@ Status: implemented
 
 [English](2026-09-16-legal-retrieval-reports-status-instead-of-filtering.md) | 中文
 
+> **2026-09-28 被取代**：检索重新默认排除已废止（`1`）与已失效（`-1`），用 `include_invalid`
+> 放开、用 `filtered_invalid_count` 解释"这一页为什么少"。本 note 引入的状态字段仍然随每条结果
+> 下发。见 [检索默认排除已废止与已失效的法条](2026-09-28-legal-retrieval-excludes-invalid-by-default.zh.md)。
+> 下面的推理保留，作为"当时为什么取消过滤、代价是什么"的记录。
+
 ## Problem
 
 检索此前默认排除已废止（`1`）与已失效（`-1`）的结果，用 `include_invalid` 放开、用

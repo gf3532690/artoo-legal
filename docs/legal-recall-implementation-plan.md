@@ -608,6 +608,15 @@ Rerank 环境可跑对比。决策与 A/B 步骤见
 > 服务端猜不出来），而它自己筛的前提是先拿得到状态；二是"默认排除"会让**结果条数与 `top_k` 对
 > 不上**，而服务端为此做的 4 倍候选放大只是补偿，不是解决。请求字段 `include_invalid` 与响应
 > 字段 `filtered_invalid_count` 一并移除。
+>
+> **2026-09-28 更新：恢复默认过滤。** 外部应用的共同用法是"检索现行法条"，把口径完全交给每个
+> 调用方自己筛，代价是每个集成方都要先读一遍枚举才能不踩坑（法条库这边已经有过读反的先例）；
+> 而"结果条数与 `top_k` 对不上"是可解释的——`filtered_invalid_count` 把被剔除的条数说清楚，
+> 4 倍候选放大只是补偿，不改变语义。现状：**默认剔除 `1` 已废止与 `-1` 已失效**，
+> `include_invalid=true` 放开；`validity_status` 与 `validity_status_label` 仍然照常下发，
+> 所以放开过滤的调用方照样能按自己的口径再筛；`match_mode=exact` 与法条详情按 ID 点名取，
+> 不受该开关影响。详见 Agent Note
+> [2026-09-28-legal-retrieval-excludes-invalid-by-default](../.agents/notes/implemented/feature/2026-09-28-legal-retrieval-excludes-invalid-by-default.md)。
 
 **已砍掉的两个字段**：`paragraph_index`（款号）与 `item_index`（项号）。款在中文立法体例里没有标号，款号只能靠"该父块内第几段"推导；项号需要另一套「（一）」解析逻辑。两者各需一份推导逻辑与测试，而检索结果经父块扩展后返回的是**整条法条**，款 / 项号当前没有下游用途支撑。等出现真实需求（例如下游要做「第X条第Y款」的精确跳转）再加。
 

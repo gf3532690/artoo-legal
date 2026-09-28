@@ -56,10 +56,16 @@ _MAX_PAGINATION_WINDOW = 100
 MATCH_MODE_SEMANTIC = "semantic"
 MATCH_MODE_EXACT = "exact"
 
-# 效力状态**不在这里过滤**。早先的默认口径是"检索排除已废止/已失效"，现改为：检索一律返回
-# 全部，把状态（原值与中文描述）随结果一起下发，由调用方自己决定怎么用——过滤发生在调用方
-# 手里的前提是它先拿得到状态。枚举与标签的唯一真源是
-# ``pipeline.legal_metadata.VALIDITY_STATUS_LABELS``。
+# 效力状态官方枚举（数据源字典，2026-09-15）：
+#   3 现行有效 / 2 已修改 / 1 已废止 / -1 已失效 / 4 尚未生效 / 0 未标注
+# 默认口径只排除「明确不具法律效力」的两个：已废止与已失效。未标注(0) 主要是修改/废止决定
+# 这类文件（本身是有效文件），尚未生效(4) 是还没生效的新法——两者都不该被静默吞掉。
+# 枚举与标签的唯一真源是 ``pipeline.legal_metadata.VALIDITY_STATUS_LABELS``。
+INVALID_VALIDITY_STATUSES = frozenset({1, -1})
+
+# 默认口径下要过采样多少倍：库内已废止/已失效约占 12%，取多少条候选得相应放大，否则过滤后
+# 一页可能凑不满。真正的解法是把 validity_status 做成 Milvus 标量字段做预过滤（需重建集合）。
+_INVALID_OVERSAMPLE = 4
 
 # 「第X条」引用：X 可以是中文数字（含零〇两）或阿拉伯数字。
 _ARTICLE_REF = re.compile(rf"第\s*([{CN_NUMERAL_CHARS}\d]+)\s*条")
@@ -123,6 +129,12 @@ class RetrievalTestRequest(BaseModel):
         description="semantic（默认，语义召回）/ exact（「法名 + 条号」精确检索）。"
         "exact 命中时直接按法条元数据返回该条，不参与相似度排序；没命中会退回 semantic，"
         "并在响应的 fallback_reason 里说明原因。",
+    )
+    include_invalid: bool = Field(
+        default=False,
+        description="是否包含已废止（validity_status=1）与已失效（-1）的法条。默认 false——"
+        "检索只返回仍有法律效力的条文。置 true 可一并查历史版本（例如按行为发生时的法律）。"
+        "只作用于语义召回；match_mode=exact 与法条详情按 ID 点名取，不受此开关影响。",
     )
     # ── 法条过滤（PRD《法条检索基础API》的"按效力层级 / 按省份城市筛选"）──
     # 层级用枚举而不是语料原始 law_type：口径变化只需改应用层映射，不用重建索引。
@@ -231,6 +243,9 @@ class RetrievalTestResponse(BaseModel):
     # 实际生效的检索模式；exact 没命中时会退回 semantic 并给出原因。
     match_mode: str = MATCH_MODE_SEMANTIC
     fallback_reason: str | None = None
+    # 默认口径下被排除的已废止/已失效条数（include_invalid=true 时恒为 0）。
+    # 单独给出是因为"为什么只返回 3 条"是调用方最容易困惑的地方。
+    filtered_invalid_count: int = 0
 # ============================================================
 # 接口实现
 # ============================================================
@@ -255,6 +270,15 @@ def _validity_status_label(value: int | None) -> str | None:
     if value is None:
         return None
     return VALIDITY_STATUS_LABELS.get(value)
+
+
+def _is_invalid_legal(metadata: dict) -> bool:
+    """该结果的效力状态是否属于「已废止 / 已失效」（默认口径下会被剔除）。
+
+    取不到 ``validity_status`` 时**视为有效**：我们读不到不等于这条法条失效，宁可多给一条，
+    也不要因为元数据缺失让调用方凭空少一条结果。
+    """
+    return metadata.get("validity_status") in INVALID_VALIDITY_STATUSES
 
 
 def _slice_page_items(
@@ -290,8 +314,9 @@ async def _exact_retrieval(
         )
         for row in rows
     ]
-    # 点名取那一条：结果照常带 validity_status 与中文描述，由调用方自行判断还算不算数。
-    items = await _build_result_items(results, global_kb_ids=global_kb_ids)
+    # exact 是「法名 + 条号」点名取那一条，不受默认效力过滤影响：调用方要的就是这一条。
+    # 结果照常带 validity_status 与中文描述，这条还算不算数由调用方判断。
+    items, _ = await _build_result_items(results, global_kb_ids=global_kb_ids)
     for item in items:
         item.routes = ["exact"]
     return RetrievalTestResponse(
@@ -402,11 +427,17 @@ async def _run_single_kb_retrieval(
     expr = legal_filter.to_milvus_expr() if legal_filter else None
     # 多取一条用来探「还有没有下一页」，所以取 window+1 条候选、再切本页。
     fetch_k = body.window() + 1
+    # 默认口径会剔掉已废止/已失效（约 12%），因此过采样候选，否则过滤后一页可能凑不满。
+    if not body.include_invalid:
+        fetch_k = min(_MAX_PAGINATION_WINDOW, fetch_k * _INVALID_OVERSAMPLE)
+    drop_invalid = not body.include_invalid
     if body.mode == "direct":
         manager = get_model_manager()
         retriever = VectorRetriever(manager.embedder, _get_milvus())
         ranked = await retriever.search(body.query, kb_id, top_k=fetch_k, expr=expr)
-        built = await _build_result_items(ranked, global_kb_ids=global_kb_ids)
+        built, dropped = await _build_result_items(
+            ranked, global_kb_ids=global_kb_ids, drop_invalid=drop_invalid
+        )
         items, has_more = _slice_page_items(built, body)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return RetrievalTestResponse(
@@ -420,6 +451,7 @@ async def _run_single_kb_retrieval(
             page_size=body.top_k,
             has_more=has_more,
             fallback_reason=fallback_reason,
+            filtered_invalid_count=dropped,
         )
 
     # hybrid 模式：三路 + 可选图谱第四路（由工厂按门控注入）+ 链路追踪。
@@ -430,8 +462,11 @@ async def _run_single_kb_retrieval(
     ranked, trace_data = await hybrid_retriever.search_with_trace(
         body.query, kb_id, top_k=fetch_k, expr=expr, apply_rerank_filter=False
     )
-    built = await _build_result_items(
-        ranked, trace_data.get("per_result"), global_kb_ids=global_kb_ids
+    built, dropped = await _build_result_items(
+        ranked,
+        trace_data.get("per_result"),
+        global_kb_ids=global_kb_ids,
+        drop_invalid=drop_invalid,
     )
     items, has_more = _slice_page_items(built, body)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -451,6 +486,7 @@ async def _run_single_kb_retrieval(
         page_size=body.top_k,
         has_more=has_more,
         fallback_reason=fallback_reason,
+        filtered_invalid_count=dropped,
     )
 
 
@@ -494,11 +530,18 @@ async def _run_multi_source_retrieval(
     # 不做问答链路的防幻觉软阈值截断，避免短/泛 query 被兜底也救不回而返回空。
     # 与单库路径同口径：多取一条探是否有下一页。
     multi_fetch_k = body.window() + 1
+    # 与单库路径同口径：默认剔除已废止/已失效时过采样候选。
+    if not body.include_invalid:
+        multi_fetch_k = min(_MAX_PAGINATION_WINDOW, multi_fetch_k * _INVALID_OVERSAMPLE)
     multi_result = await multi_kb.search(
         body.query, kb_configs, top_k=multi_fetch_k, tenant_id=identity.tenant_id,
         filters=body.to_filter(), apply_rerank_filter=False,
     )
-    built = await _build_result_items(multi_result.results, global_kb_ids=global_kb_ids)
+    built, dropped = await _build_result_items(
+        multi_result.results,
+        global_kb_ids=global_kb_ids,
+        drop_invalid=not body.include_invalid,
+    )
     items, has_more = _slice_page_items(built, body)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
@@ -515,6 +558,7 @@ async def _run_multi_source_retrieval(
         page_size=body.top_k,
         has_more=has_more,
         fallback_reason=fallback_reason,
+        filtered_invalid_count=dropped,
     )
 
 
@@ -557,15 +601,16 @@ async def _build_result_items(
     results: list[RetrievalResult],
     per_result: dict | None = None,
     global_kb_ids: list[str] | None = None,
-) -> list[RetrievalResultItem]:
+    drop_invalid: bool = False,
+) -> tuple[list[RetrievalResultItem], int]:
     """将检索结果转换为响应格式，附带文件名与（可选的）链路分数信号。
 
     ``source_type`` 恒为 ``knowledge_base``：会话附件来源已随会话链路移除（见方案 D7）。
     原件获取由第三方前端按 ``doc_id`` 自行调用 ``/api/documents/{doc_id}/raw``，本响应不返回原件 URL。
 
-    **不按效力状态过滤**：早先的默认口径是排除已废止/已失效，现已取消——检索一律返回全部，
-    调用方拿到 ``validity_status`` 与中文描述 ``validity_status_label`` 后自己决定怎么用。
-    过滤放在调用方手里的前提，是它先拿得到状态。
+    ``drop_invalid=True`` 时剔除效力状态为「已废止 / 已失效」的条目（默认检索口径），并返回
+    被剔除的条数，供响应里的 ``filtered_invalid_count`` 解释"为什么这一页不满"。
+    状态字段与中文描述照常下发——放开过滤（``include_invalid=true``）的调用方仍然读得到。
     """
     doc_ids = list({r.doc_id for r in results})
     doc_filenames: dict[str, str] = {}
@@ -639,6 +684,11 @@ async def _build_result_items(
         if label is not None:
             metadata["validity_status_label"] = label
 
+        # 默认口径剔除已废止/已失效：状态与标签先补齐再判断，放开过滤的调用方照样拿得到。
+        if drop_invalid and _is_invalid_legal(metadata):
+            dropped += 1
+            continue
+
         # 法条 ID：由「文档 + 条号」派生，供调用方按法条取详情/去重，不需要额外入库字段。
         # 无条号的文档（修正案 / 决定类）不给，而不是给一个会撞车的假 ID。
         article_number = legal_raw.get("article_number")
@@ -668,4 +718,4 @@ async def _build_result_items(
                 metadata=metadata,
             )
         )
-    return items
+    return items, dropped

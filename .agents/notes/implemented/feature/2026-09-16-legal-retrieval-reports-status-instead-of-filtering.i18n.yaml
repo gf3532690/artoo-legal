@@ -2,5 +2,5 @@
 # last confirmed-consistent state. Both languages carry equal authority; after
 # editing either side, bring the other along and re-record both hashes with:
 #   git hash-object .agents/notes/implemented/feature/2026-09-16-legal-retrieval-reports-status-instead-of-filtering.md .agents/notes/implemented/feature/2026-09-16-legal-retrieval-reports-status-instead-of-filtering.zh.md
-2026-09-16-legal-retrieval-reports-status-instead-of-filtering.md: 7f5157e4d96e2a9f68d64e83b139186c6fcbc378
-2026-09-16-legal-retrieval-reports-status-instead-of-filtering.zh.md: e807d10af8455f326856d67532fa239ca0b9bd6e
+2026-09-16-legal-retrieval-reports-status-instead-of-filtering.md: fcdb3c2369ee2bfc550133196458c01c7683cce6
+2026-09-16-legal-retrieval-reports-status-instead-of-filtering.zh.md: ad3f8cf3c90dfd66cf80ef3efcc45e5fd6577f37

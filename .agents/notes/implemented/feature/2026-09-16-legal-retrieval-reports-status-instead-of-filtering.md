@@ -4,6 +4,12 @@ Status: implemented
 
 English | [中文](2026-09-16-legal-retrieval-reports-status-instead-of-filtering.zh.md)
 
+> **Superseded on 2026-09-28**: retrieval excludes 已废止 (`1`) and 已失效 (`-1`) by default again,
+> with `include_invalid` to lift the exclusion and `filtered_invalid_count` to explain a short page.
+> The status fields this note introduced stay on every result. See
+> [Retrieval excludes repealed and lapsed statutes by default](2026-09-28-legal-retrieval-excludes-invalid-by-default.md).
+> The reasoning below is kept as the record of why the filtering was removed and what it cost.
+
 ## Problem
 
 Retrieval excluded 已废止 (`1`) and 已失效 (`-1`) results by default, with `include_invalid` to lift

@@ -21,6 +21,7 @@ from app.api.retrieval import (
     RetrievalTestResponse,
     _MAX_PAGINATION_WINDOW,
     RetrievalTestRequest,
+    _is_invalid_legal,
     _run_retrieval,
     _slice_page_items,
     _validity_status_label,
@@ -101,18 +102,29 @@ class TestMatchModeValidation:
         assert MATCH_MODE_EXACT == "exact"
 
 
-class TestStatusIsReportedNotFiltered:
-    """检索**不按效力状态过滤**，而是把状态（原值 + 中文描述）随结果一起下发。
+class TestValidityStatusFiltering:
+    """默认口径排除已废止/已失效；``include_invalid`` 放开，状态与标签照常下发。"""
 
-    早先的默认口径是排除已废止/已失效（约占库内 12%）；改成"返回全部 + 带上状态"之后，
-    怎么用状态由调用方决定——而过滤放在调用方手里的前提，是它先拿得到状态。
-    """
+    def test_request_defaults_to_excluding_invalid(self) -> None:
+        assert RetrievalTestRequest.model_fields["include_invalid"].default is False
 
-    def test_request_has_no_filter_switch(self) -> None:
-        assert "include_invalid" not in RetrievalTestRequest.model_fields
+    def test_response_reports_filtered_count(self) -> None:
+        """被过滤掉几条必须有个交代，否则"为什么只返回 3 条"是调用方最容易困惑的地方。"""
+        assert RetrievalTestResponse.model_fields["filtered_invalid_count"].default == 0
 
-    def test_response_has_no_filtered_count(self) -> None:
-        assert "filtered_invalid_count" not in RetrievalTestResponse.model_fields
+    @pytest.mark.parametrize("status", [1, -1])
+    def test_repealed_and_lapsed_are_dropped(self, status: int) -> None:
+        assert _is_invalid_legal({"validity_status": status}) is True
+
+    @pytest.mark.parametrize("status", [3, 2, 0, 4])
+    def test_other_statuses_are_kept(self, status: int) -> None:
+        """现行有效/已修改/未标注/尚未生效都不该被静默吞掉。"""
+        assert _is_invalid_legal({"validity_status": status}) is False
+
+    def test_missing_status_is_treated_as_valid(self) -> None:
+        """读不到状态不等于失效：宁可多给一条，也不要凭空少一条。"""
+        assert _is_invalid_legal({}) is False
+        assert _is_invalid_legal({"validity_status": None}) is False
 
     @pytest.mark.parametrize("status,label", [
         (3, "现行有效"),
@@ -156,13 +168,19 @@ class TestRoutesAreRegistered:
         request_props = schema["components"]["schemas"]["RetrievalTestRequest"]["properties"]
         assert request_props["page"]["default"] == 1
         assert request_props["match_mode"]["default"] == MATCH_MODE_SEMANTIC
-        # 效力状态过滤已取消：请求里没有开关，响应里也没有"被过滤掉几条"
-        assert "include_invalid" not in request_props
+        # 效力状态默认过滤：请求里有放开开关，响应里有"被过滤掉几条"的回执
+        assert request_props["include_invalid"]["default"] is False
 
         response_props = schema["components"]["schemas"]["RetrievalTestResponse"]["properties"]
-        for field in ("page", "page_size", "has_more", "match_mode", "fallback_reason"):
+        for field in (
+            "page",
+            "page_size",
+            "has_more",
+            "match_mode",
+            "fallback_reason",
+            "filtered_invalid_count",
+        ):
             assert field in response_props
-        assert "filtered_invalid_count" not in response_props
 
         detail_props = schema["components"]["schemas"]["LegalArticleDetail"]["properties"]
         for field in ("article_id", "content", "matched_content", "law_name", "article_label"):

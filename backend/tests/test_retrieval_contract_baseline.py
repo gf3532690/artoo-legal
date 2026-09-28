@@ -75,6 +75,9 @@ class TestResponseEnvelope:
     ``page`` / ``page_size`` / ``has_more`` 描述分页位置，``match_mode`` 回显实际生效的模式
     （exact 没命中会退回 semantic），``fallback_reason`` 说明回退原因。都带默认值，
     因此对不传新参数的既有调用方是向后兼容的。
+
+    随后新增 ``filtered_invalid_count``：默认口径会剔除已废止/已失效的法条，这个字段回答
+    "这一页为什么不满"。同样带默认值 0，既有调用方不受影响。
     """
 
     EXPECTED_KEYS = {
@@ -91,6 +94,7 @@ class TestResponseEnvelope:
         "has_more",
         "match_mode",
         "fallback_reason",
+        "filtered_invalid_count",
     }
 
     def test_envelope_keys_are_exactly_the_documented_set(self) -> None:
